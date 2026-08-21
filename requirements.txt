@@ -1,2 +1,3 @@
 fastmcp
 python-dotenv
+armoriq-sdk

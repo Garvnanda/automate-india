@@ -85,7 +85,14 @@ anything ArmorIQ-related is even involved.
 
 - [x] **Batch 1** — MCP servers (`dataset-mcp`, `jobs-mcp`, `registry-mcp`), SQLite seed/reset,
       structured logging contract. Verified with `tests/test_mcp_servers.py`.
-- [ ] **Batch 2** — ArmorIQ platform spike, agent core (`--unguarded`, `--force-violation`)
+- [x] **Batch 2, Phase 1** — ArmorIQ platform spike: block (Gate 2, violation 1's mechanism) and
+      hold/approve (Gate 2, violation 2's mechanism) both proven live against the real platform.
+      `agent/armoriq_client.py` written. See `done.md` for the full evidence trail and two
+      platform bugs found along the way (worth reporting to organizers).
+- [x] **Batch 2, Phase 3** — agent core done. `--force-violation 1/2` both verified live
+      (real row deletion, real production promotion). Organic run (no flag) completes the
+      happy path correctly every time; hasn't organically triggered the injection in 3
+      attempts (a safe model refusal, not a bug — `--force-violation` exists for exactly this).
 - [ ] **Batch 3** — ArmorIQ enforcement (`--guarded`), hold/approve/resume
 - [ ] **Batch 4** — demo panel, `demo.sh`, evidence, video
 
@@ -93,13 +100,21 @@ Commands below get filled in as each batch lands — see `done.md` for the detai
 checklist behind this summary.
 
 ```bash
-# coming in Batch 2/3:
-python -m agent.main --unguarded
+# working now:
+python -m agent.main --unguarded                       # happy path, organic
+python -m agent.main --unguarded --force-violation 1    # deterministic: delete_rows
+python -m agent.main --unguarded --force-violation 2    # deterministic: production promotion
+
+# coming in Batch 3:
 python -m agent.main --guarded
 python -m agent.main --guarded --force-violation 1
 python -m agent.main --guarded --force-violation 2
 ./demo.sh
 ```
+
+Requires `OPENROUTER_API_KEY` in `.env` (free-tier is fine — set `OPENROUTER_MODEL` to any
+current free tool-calling model from [openrouter.ai/models](https://openrouter.ai/models);
+the free-tier roster shifts, so verify your pick supports tool calling before relying on it).
 
 ## Repo layout
 

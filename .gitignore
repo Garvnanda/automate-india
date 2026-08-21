@@ -4,3 +4,5 @@ __pycache__/
 .env
 data/*.db
 logs/*.jsonl
+.tools/
+armoriq.yaml

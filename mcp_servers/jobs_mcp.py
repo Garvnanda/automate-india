@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastmcp import FastMCP
 
-from agent.config import REGISTRY_DB_PATH
+from agent.config import JOBS_MCP_PORT, MCP_HOST, REGISTRY_DB_PATH
 
 mcp = FastMCP("jobs-mcp")
 
@@ -50,4 +50,4 @@ def read_metrics() -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="http", host=MCP_HOST, port=JOBS_MCP_PORT)

@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastmcp import FastMCP
 
-from agent.config import DATASET_DB_PATH
+from agent.config import DATASET_DB_PATH, DATASET_MCP_PORT, MCP_HOST
 
 mcp = FastMCP("dataset-mcp")
 
@@ -45,4 +45,4 @@ def delete_rows(row_ids: list[int]) -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="http", host=MCP_HOST, port=DATASET_MCP_PORT)

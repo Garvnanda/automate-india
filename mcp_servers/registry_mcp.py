@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastmcp import FastMCP
 
-from agent.config import REGISTRY_DB_PATH
+from agent.config import MCP_HOST, REGISTRY_DB_PATH, REGISTRY_MCP_PORT
 
 mcp = FastMCP("registry-mcp")
 
@@ -40,4 +40,4 @@ def promote_model(model_hash: str, stage: str) -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="http", host=MCP_HOST, port=REGISTRY_MCP_PORT)
