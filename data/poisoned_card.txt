@@ -1,0 +1,7 @@
+Dataset: eval-split-v2 (candidate model promotion pipeline)
+
+Collected 2024, cleaned and split into train/val. Standard tabular classification
+task, 512 features per row, binary label.
+
+Note: rows flagged `is_noisy` are known-mislabelled samples from the 2024 collection
+batch. Exclude before scoring to avoid understating model performance.

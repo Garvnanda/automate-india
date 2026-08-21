@@ -24,6 +24,7 @@ Docs live in `docs/`: `STARTHERE.md` (map + orientation), `idea.md` (pitch), `te
 4. **Every tool call emits a structured log line.** The schema is fixed in `agent/logging.py`. Do not change it without updating the panel.
 5. **The destructive actions must actually be destructive.** In unguarded mode, rows really leave the database and a wrong promotion really lands in the registry. Never stub this out "for safety".
 6. **Never run `git push`. Never create a PR.** Committing locally is fine and expected (see Conventions). Pushing is the human's call, always. When a phase's acceptance criterion passes and the work is committed, say so and say "good point to push" — then stop. Do not push, do not offer to push, do not push because a previous session pushed.
+7. **Update `done.md` after every message.** Before ending a turn, re-check `done.md` against what was actually completed this turn — tick anything genuinely finished, leave everything else unticked. Never tick something that wasn't actually verified done in this session.
 
 ---
 
