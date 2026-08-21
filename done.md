@@ -14,6 +14,15 @@ Status legend: [ ] pending  [x] done  [~] in progress/partial
       unplanned params raise IntentMismatchException? Decides whether Surface B (session/hold)
       is mandatory or optional. Resolved in Phase 1d — not reached yet.
 - [ ] GATE 1 risk: ArmorIQ proxy may not reach localhost MCP servers — resolved in Phase 1b
+- [x] Reproducibility requirement: judge clones repo and runs README commands verbatim on
+      their own machine. New CLAUDE.md rule 8 added. README.md created now (not deferred to
+      Phase 7) and will grow each batch. Verified for real this turn: copied the repo (minus
+      .venv/.git/db files) into a throwaway dir, fresh `python -m venv`, `pip install -r
+      requirements.txt`, `python data/reset.py`, `python tests/test_mcp_servers.py` — all
+      passed with no reliance on anything installed globally on this machine.
+- [x] `.env.example` added (ARMORIQ_API_KEY, ARMORIQ_ENV, AGENT_EMAIL, APPROVER_EMAIL,
+      OPENROUTER_API_KEY) and `agent/config.py` now loads `.env` via python-dotenv (added to
+      requirements.txt explicitly, not left as an implicit transitive dep of fastmcp).
 - [x] `pip install fastmcp` was first run globally (not in a venv) before a venv existed —
       it upgraded/downgraded shared packages (starlette, uvicorn, python-dotenv,
       python-multipart) and pip flagged a version conflict with an already-installed fastapi

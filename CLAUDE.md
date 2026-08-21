@@ -25,6 +25,7 @@ Docs live in `docs/`: `STARTHERE.md` (map + orientation), `idea.md` (pitch), `te
 5. **The destructive actions must actually be destructive.** In unguarded mode, rows really leave the database and a wrong promotion really lands in the registry. Never stub this out "for safety".
 6. **Never run `git push`. Never create a PR.** Committing locally is fine and expected (see Conventions). Pushing is the human's call, always. When a phase's acceptance criterion passes and the work is committed, say so and say "good point to push" — then stop. Do not push, do not offer to push, do not push because a previous session pushed.
 7. **Update `done.md` after every message.** Before ending a turn, re-check `done.md` against what was actually completed this turn — tick anything genuinely finished, leave everything else unticked. Never tick something that wasn't actually verified done in this session.
+8. **README.md must work verbatim on a judge's clean machine.** They clone the repo and run exactly the commands in the README — nothing else. No hardcoded local paths, no reliance on globally-installed packages, `requirements.txt` kept in sync with every import actually used, `.env.example` kept in sync with every env var actually read. README grows with each batch instead of being written once at the end. When in doubt, verify by installing into a throwaway venv from a fresh copy of the repo and running the README steps for real — don't just eyeball it.
 
 ---
 
