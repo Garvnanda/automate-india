@@ -97,7 +97,7 @@ anything ArmorIQ-related is even involved.
       happy path completes under enforcement, violation 1 blocked with rows intact, violation 2
       held → approved from the dashboard → agent resumed and wrote only then. See
       [`evidence/`](evidence/) and `tests/verify_guarded.py`.
-- [ ] **Batch 4** — demo panel, `demo.sh`, video
+- [x] **Batch 4** — demo panel (real, not a mockup — see below), `demo.sh`. Video still to record.
 
 Commands below get filled in as each batch lands — see `done.md` for the detailed, ticked
 checklist behind this summary.
@@ -148,6 +148,33 @@ Requires `OPENROUTER_API_KEY` in `.env` (free-tier is fine — set `OPENROUTER_M
 current free tool-calling model from [openrouter.ai/models](https://openrouter.ai/models);
 the free-tier roster shifts, so verify your pick supports tool calling before relying on it).
 
+### One-command repro
+
+```bash
+./demo.sh
+```
+
+Walks the full sequence from `technical.md` §9: unguarded damage → reset → guarded happy path →
+guarded violation 1 (blocked) → guarded violation 2 (held — approve it live when prompted).
+Guarded steps still need `agent.infra` running in another terminal first.
+
+### The panel
+
+A real instrument panel — dual seismograph traces, needle gauges, brass toggle switches — driven
+entirely by live data: every trace pulse is a real line `agent.main` printed, every gauge reading
+comes from the actual SQLite state, and the held-action key is a status indicator, not a button —
+real approval only ever happens on ArmorIQ's own dashboard, same as the CLI.
+
+```bash
+python -m panel.server
+```
+
+Open `http://127.0.0.1:8080`. Flip **GUARDED** on or off, pick a scenario (HAPPY / VIOL-1 /
+VIOL-2), it runs for real. Only one lane animates per run — unguarded and guarded share the same
+database, so they can't honestly run simultaneously; the idle lane just shows its last result,
+dimmed, until you run that mode again. **RESET** re-seeds before every scenario run automatically,
+so consecutive runs are always comparable.
+
 ## Repo layout
 
 ```
@@ -155,12 +182,13 @@ promotionguard/
 ├── README.md · CLAUDE.md · done.md
 ├── docs/          idea.md · technical.md · implementation.md · STARTHERE.md
 ├── requirements.txt · .env.example
-├── agent/         config.py · logging.py · (main.py, plan.py, armoriq_client.py — Batch 2)
-├── mcp_servers/   dataset_mcp.py · jobs_mcp.py · registry_mcp.py
+├── agent/         config.py · logging.py · plan.py · armoriq_client.py · main.py · infra.py
+├── mcp_servers/   dataset_mcp.py · jobs_mcp.py · registry_mcp.py · app.py (bundles all three)
 ├── data/          seed.py · reset.py · poisoned_card.txt
-├── tests/         test_mcp_servers.py
-├── panel/         (Batch 4)
-└── evidence/      (Batch 3/4)
+├── tests/         test_mcp_servers.py · verify_guarded.py
+├── panel/         server.py · index.html
+├── evidence/      logs/ · screenshots/ · README.md
+└── demo.sh
 ```
 
 ## Why a keyword filter doesn't catch either violation

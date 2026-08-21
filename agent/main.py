@@ -16,7 +16,11 @@ import urllib.error
 import urllib.request
 import uuid
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+# line_buffering: without this, stdout is fully buffered whenever it's not a
+# TTY (any subprocess consumer, including panel/server.py's live SSE stream)
+# and nothing appears until the process exits. Verified live — a guarded run
+# looked "hung" from the panel for its whole ~20s duration before this.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
 from armoriq_sdk.exceptions import (
     IntentMismatchException,

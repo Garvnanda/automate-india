@@ -292,12 +292,50 @@ Status legend: [ ] pending  [x] done  [~] in progress/partial
       doesn't mistake them for the original unverified draft.
 
 ## Batch 4 — Phase 6 (panel) + Phase 7 (README/demo/video)
-- [ ] panel/ — plain HTML/CSS/JS, split screen unguarded vs guarded
-- [ ] scenario buttons (happy path / violation 1 / violation 2), streaming colour-coded logs
-- [ ] world-state panel (live labels row count, promotions contents)
-- [ ] reset button wired to reset.py
-- [ ] README.md, demo.sh, evidence/ folder
-- [ ] demo video recorded the moment flow first works end to end
+- [x] **Design phase**: mocked up two full visual directions as standalone artifacts (chain-of-
+      custody/glassmorphism, and a brushed-metal analog instrument), user picked the Instrument.
+      Then rebuilt for real — the mockup's fake choreographed dual-trace animation could not
+      survive contact with reality (see honesty item below) and was redesigned accordingly.
+- [x] `panel/server.py` — stdlib only (`http.server`, no new dependency, matches the project's
+      "plain, no framework" rule for the backend too). Three endpoints: `GET /api/state`,
+      `POST /api/reset`, `GET /api/run` (Server-Sent Events, streams the real `agent.main`
+      subprocess's stdout line by line as it happens).
+- [x] `panel/index.html` — the Instrument, real this time. Scope traces, needle gauges, brass
+      toggle switches (GUARDED mode + HAPPY/VIOL-1/VIOL-2 scenario), lamps (ARMED/HOLD/BLOCK),
+      a scrolling console log. All state comes from `/api/state` and the live SSE stream — no
+      scripted/fake data anywhere.
+- [x] **Honesty adaptation from the mockup, made explicit, not silently dropped:** unguarded and
+      guarded share one SQLite database, so they genuinely cannot run simultaneously — the
+      mockup's dual-lane-moving-at-once animation was a demo-only choreography, not something
+      that could be real. Fixed: only the lane matching the active run animates; the idle lane
+      shows its last real result, dimmed. Also: the mockup's key was clickable and faked local
+      approval — the real key is a **status indicator only**. Actual approval only ever happens
+      on ArmorIQ's own dashboard by a human with the right role; the panel just watches and
+      reflects the real `held` → `approved` → `executed` verdict sequence as it arrives.
+- [x] **Real bug found and fixed while wiring this up:** Python fully buffers stdout whenever
+      it isn't a TTY — which is exactly `subprocess.Popen` piping `agent.main`'s output into the
+      panel's SSE stream. Guarded runs looked hung for their entire ~20s duration (data was
+      actually flowing to the log file fine, just not to stdout). Fixed two ways:
+      `sys.stdout.reconfigure(..., line_buffering=True)` in `agent/main.py` (helps any consumer,
+      not just the panel) and `python -u` in the panel's subprocess invocation (belt and braces).
+      Confirmed live afterward: real-time streaming, correct trace timing, no more silent gap.
+- [x] `demo.sh` — the full `technical.md` §9 sequence (unguarded damage → reset → guarded happy
+      path → guarded violation 1 → guarded violation 2 with a live pause to approve), checks for
+      `.session.json` and gives the plain "run agent.infra first" message if it's missing rather
+      than failing halfway through. Verified live through step 3 (steps 4-5 already independently
+      proven multiple times this session, not worth re-spending a real ArmorIQ hold cycle on).
+- [x] **Verified live, twice, end to end, through the actual panel (not just the backend in
+      isolation):** a guarded happy path clicked through the real browser UI, animated correctly,
+      and a guarded violation-2 hold — created via the panel, approved on the real ArmorIQ
+      dashboard, confirmed the SSE stream carried `held` → `approved` → `executed` through to the
+      browser. Screenshots and logs from the Batch 3 hold cycle already cover this evidence; the
+      panel is a second, independent confirmation of the same real mechanism, not a new claim.
+- [x] Fixed a display-only bug found along the way: `data/reset.py`'s em-dash print garbled on
+      Windows consoles (cp1252) — same class of issue already fixed once in `agent/main.py`,
+      same fix applied (`sys.stdout.reconfigure(encoding="utf-8")`).
+- [x] README.md updated: panel usage, `demo.sh` usage, repo layout. `evidence/` still needs the
+      demo video — not recorded yet.
+- [ ] Demo video — not recorded yet.
 
 ## Phase 8 — buffer (only if time allows)
 - [ ] token expiry mid-run demo

@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PromotionGuard Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --room:#0b0a09;
+  --panel-lo:#17130f;
+  --panel:#221d18;
+  --panel-hi:#2e2820;
+  --edge-hi:rgba(255,235,205,.09);
+  --ink:#ece3d4;
+  --dim:#7c7263;
+  --brass:#c9a227;
+  --amber:#f2a81d;
+  --red:#e2412c;
+  --green:#5ac476;
+  --trace-a:#f0703a;
+  --trace-b:#5ac476;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+  --cond:'Barlow Condensed','Arial Narrow',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html{height:100%;}
+body{
+  min-height:100%;
+  background:
+    radial-gradient(1200px 700px at 50% -10%, #1a1512, transparent 70%),
+    radial-gradient(700px 500px at 50% 120%, #150f0c, transparent 70%),
+    var(--room);
+  font-family:var(--cond);
+  color:var(--ink);
+  display:flex; align-items:center; justify-content:center;
+  padding:clamp(10px,2.2vh,26px) clamp(10px,2vw,26px);
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+
+.panel{
+  position:relative;
+  width:min(1200px,97vw);
+  display:flex; flex-direction:column;
+  gap:clamp(9px,1.2vh,14px);
+  padding:clamp(16px,2.2vh,26px) clamp(16px,2vw,26px);
+  border-radius:14px;
+  background:
+    repeating-linear-gradient(93deg, rgba(255,240,215,.016) 0 1px, transparent 1px 4px),
+    linear-gradient(163deg, var(--panel-hi) 0%, var(--panel) 34%, var(--panel-lo) 100%);
+  box-shadow:
+    inset 0 1px 0 var(--edge-hi), inset 0 -1px 0 rgba(0,0,0,.7),
+    inset 1px 0 0 rgba(255,235,205,.04), 0 40px 90px -30px #000, 0 0 0 1px #0a0807;
+}
+.screw{
+  position:absolute; width:13px; height:13px; border-radius:50%;
+  background:radial-gradient(circle at 34% 28%, #574e42, #1d1815 72%);
+  box-shadow:inset 0 1px 1px rgba(255,235,205,.16), 0 1px 3px rgba(0,0,0,.8);
+}
+.screw::after{
+  content:''; position:absolute; inset:0; margin:auto;
+  width:8px; height:1.5px; border-radius:1px; background:#100d0b;
+  box-shadow:0 1px 0 rgba(255,235,205,.09);
+}
+.screw.tl{top:9px;left:9px;} .screw.tr{top:9px;right:9px;transform:rotate(52deg);}
+.screw.bl{bottom:9px;left:9px;transform:rotate(24deg);} .screw.br{bottom:9px;right:9px;transform:rotate(71deg);}
+
+.bezel{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:18px; flex-wrap:wrap; padding:0 6px 11px;
+  border-bottom:1px solid rgba(0,0,0,.55); box-shadow:0 1px 0 rgba(255,235,205,.05);
+}
+.mark{
+  font-size:clamp(19px,2.5vw,27px); font-weight:600; letter-spacing:.34em; color:var(--brass);
+  text-shadow:0 1px 0 rgba(0,0,0,.85), 0 -1px 0 rgba(255,235,205,.05);
+}
+.sub{font-family:var(--mono); font-size:9.5px; letter-spacing:.16em; color:#6b6154; margin-top:4px;}
+
+.annun{display:flex; gap:9px;}
+.lamp{
+  display:flex; flex-direction:column; align-items:center; gap:5px;
+  padding:7px 11px 6px; border-radius:7px;
+  background:linear-gradient(180deg,#191512,#0f0c0a);
+  box-shadow:inset 0 1px 0 rgba(255,235,205,.05), inset 0 -1px 2px rgba(0,0,0,.7), 0 1px 0 rgba(255,235,205,.04);
+}
+.lamp i{
+  width:13px; height:13px; border-radius:50%; display:block;
+  background:radial-gradient(circle at 34% 30%, #3a332c, #14100e 75%);
+  box-shadow:inset 0 0 3px rgba(0,0,0,.9), inset 0 1px 1px rgba(255,235,205,.1);
+  transition:background .12s linear, box-shadow .12s linear;
+}
+.lamp span{font-family:var(--mono); font-size:8.5px; letter-spacing:.15em; color:#655c50; transition:color .12s linear;}
+.lamp.on i{
+  background:radial-gradient(circle at 34% 30%, #fff3d2, var(--c) 58%, color-mix(in srgb, var(--c) 55%, #000) 100%);
+  box-shadow:0 0 14px 2px color-mix(in srgb, var(--c) 65%, transparent), inset 0 1px 2px rgba(255,255,255,.55);
+}
+.lamp.on span{color:var(--c);}
+.lamp#lampArmed{--c:var(--green);} .lamp#lampHold{--c:var(--amber);} .lamp#lampBlock{--c:var(--red);}
+.lamp.blink i{animation:blink 1.05s steps(1,end) infinite;}
+@keyframes blink{0%,55%{opacity:1;}56%,100%{opacity:.28;}}
+
+.scope{
+  position:relative; border-radius:9px; overflow:hidden;
+  height:clamp(180px,30vh,270px);
+  background:linear-gradient(180deg,#0a0908,#060505);
+  box-shadow:inset 0 0 0 1px #000, inset 0 3px 14px rgba(0,0,0,.95), inset 0 0 60px rgba(0,0,0,.6), 0 1px 0 rgba(255,235,205,.06);
+}
+.scope canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
+.glass{
+  position:absolute; inset:0; pointer-events:none;
+  background:
+    linear-gradient(103deg, rgba(255,245,225,.055) 0%, transparent 26%, transparent 74%, rgba(255,245,225,.022) 100%),
+    radial-gradient(130% 68% at 26% -14%, rgba(255,248,232,.05), transparent 56%);
+}
+.lane-tag{
+  position:absolute; left:11px; font-family:var(--mono); font-size:9px; letter-spacing:.18em;
+  pointer-events:none; text-shadow:0 0 8px rgba(0,0,0,.9); transition:opacity .3s;
+}
+.lane-tag.a{top:9px; color:var(--trace-a);} .lane-tag.b{top:50%; margin-top:4px; color:var(--trace-b);}
+.lane-tag.idle{opacity:.35;}
+.ceil-tag{
+  position:absolute; right:11px; top:50%; margin-top:-6px;
+  font-family:var(--mono); font-size:8px; letter-spacing:.14em; color:#5d5449;
+  pointer-events:none; transition:color .2s;
+}
+.ceil-tag.hot{color:var(--red);}
+
+.bay{display:grid; grid-template-columns:1fr 1fr 1.12fr; gap:clamp(8px,1.1vw,14px);}
+@media (max-width:760px){ .bay{grid-template-columns:1fr 1fr;} .keycell{grid-column:1 / -1;} }
+.cell{
+  border-radius:9px; padding:11px 12px 10px;
+  background:linear-gradient(178deg,#1d1915,#131010);
+  box-shadow:inset 0 1px 0 rgba(255,235,205,.055), inset 0 -2px 5px rgba(0,0,0,.6), 0 1px 0 rgba(255,235,205,.035);
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  transition:opacity .3s;
+}
+.cell.idle{opacity:.55;}
+.cell > canvas{width:100%; max-width:190px; height:auto; display:block;}
+.readout{display:flex; align-items:baseline; gap:8px; font-family:var(--mono); font-variant-numeric:tabular-nums;}
+.readout b{font-size:clamp(22px,3vw,30px); font-weight:700; letter-spacing:.02em; line-height:1;}
+.readout em{font-style:normal; font-size:9px; letter-spacing:.15em; color:#6b6154;}
+.cellA .readout b{color:var(--trace-a);} .cellB .readout b{color:var(--trace-b);}
+.subread{
+  width:100%; display:flex; justify-content:space-between; align-items:center;
+  font-family:var(--mono); font-size:8.5px; letter-spacing:.13em; color:#655c50;
+  padding-top:6px; border-top:1px solid rgba(0,0,0,.5); box-shadow:0 -1px 0 rgba(255,235,205,.03);
+}
+.subread b{font-size:12px; color:var(--ink); font-weight:700;}
+.subread b.hot{color:var(--red);} .subread b.warm{color:var(--amber);}
+
+.keycell{justify-content:center; gap:8px;}
+.keyhole{
+  position:relative; width:74px; height:74px; border-radius:50%;
+  background:radial-gradient(circle at 36% 28%, #3b332a, #14110e 76%);
+  box-shadow:inset 0 2px 4px rgba(255,235,205,.1), inset 0 -3px 7px rgba(0,0,0,.85), 0 2px 6px rgba(0,0,0,.7);
+  display:flex; align-items:center; justify-content:center;
+  transition:box-shadow .25s ease;
+}
+.keyhole::before{content:''; position:absolute; inset:8px; border-radius:50%; border:1px dashed rgba(255,235,205,.09);}
+.keyhole.armed{box-shadow:inset 0 2px 4px rgba(255,235,205,.14), inset 0 -3px 7px rgba(0,0,0,.85), 0 0 22px 3px rgba(242,168,29,.42), 0 2px 6px rgba(0,0,0,.7);}
+.key{width:40px; height:40px; position:relative; transition:transform .55s cubic-bezier(.34,1.4,.4,1); transform:rotate(0deg);}
+.keyhole.turned .key{transform:rotate(92deg);}
+.key .bar{position:absolute; left:50%; top:7px; width:5px; height:27px; margin-left:-2.5px; border-radius:2px; background:linear-gradient(180deg,#5b5145,#2c2620); box-shadow:inset 0 1px 0 rgba(255,235,205,.2);}
+.key .bit{position:absolute; left:50%; bottom:7px; width:14px; height:6px; margin-left:-2.5px; border-radius:1.5px; background:linear-gradient(180deg,#5b5145,#2c2620); box-shadow:inset 0 1px 0 rgba(255,235,205,.18);}
+.key .head{position:absolute; left:50%; top:0; width:16px; height:16px; margin-left:-8px; border-radius:50%; border:3px solid #4c4339; background:transparent; box-shadow:inset 0 1px 0 rgba(255,235,205,.18);}
+.keyhole.armed .key .bar,.keyhole.armed .key .bit{background:linear-gradient(180deg,#e8c463,#9a7418);}
+.keyhole.armed .key .head{border-color:#d6b054;}
+.keylabel{font-family:var(--mono); font-size:8.5px; letter-spacing:.13em; color:#6b6154; text-align:center; transition:color .2s;}
+.keycell.armed .keylabel{color:var(--amber);}
+.keysub{font-family:var(--mono); font-size:8px; letter-spacing:.04em; color:#5b5348; text-align:center; line-height:1.5; max-width:220px;}
+
+.controls{
+  display:flex; align-items:flex-end; justify-content:space-between;
+  gap:16px; flex-wrap:wrap; padding-top:clamp(7px,1vh,11px);
+  border-top:1px solid rgba(0,0,0,.55); box-shadow:0 -1px 0 rgba(255,235,205,.05);
+}
+.switches{display:flex; gap:clamp(10px,1.8vw,22px); align-items:flex-end;}
+.tog{display:flex; flex-direction:column; align-items:center; gap:6px; background:none; border:none; padding:0; cursor:pointer;}
+.tog:disabled{cursor:not-allowed; opacity:.45;}
+.tog .track{
+  position:relative; width:32px; height:46px; border-radius:6px;
+  background:linear-gradient(180deg,#0e0c0a,#191512);
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.9), inset 0 -1px 0 rgba(255,235,205,.06);
+  display:flex; align-items:flex-end; justify-content:center;
+}
+.tog .lever{
+  position:absolute; bottom:8px; width:10px; height:28px; border-radius:5px;
+  transform-origin:bottom center; transform:rotate(0deg) translateY(6px) scaleY(.82);
+  background:linear-gradient(180deg,#6e6355,#39322a);
+  box-shadow:inset 0 1px 0 rgba(255,235,205,.28), 0 3px 6px rgba(0,0,0,.7);
+  transition:transform .19s cubic-bezier(.3,1.5,.5,1), background .19s;
+}
+.tog .lever::after{
+  content:''; position:absolute; top:-5px; left:50%; margin-left:-6.5px; width:13px; height:13px; border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, #8b7c68, #423931 72%);
+  box-shadow:inset 0 1px 0 rgba(255,235,205,.35), 0 2px 4px rgba(0,0,0,.6);
+}
+.tog[aria-pressed="true"] .lever{transform:rotate(0deg) translateY(-5px) scaleY(1); background:linear-gradient(180deg,#e0be6a,#8a6a16);}
+.tog.guard[aria-pressed="true"] .lever{background:linear-gradient(180deg,#7fd39a,#2f7a4d);}
+.tog .cap{font-family:var(--mono); font-size:8px; letter-spacing:.11em; color:#655c50; transition:color .18s;}
+.tog[aria-pressed="true"] .cap{color:var(--brass);}
+.tog.guard[aria-pressed="true"] .cap{color:var(--green);}
+.tog:focus-visible .track{outline:2px solid var(--brass); outline-offset:3px;}
+.divider{width:1px; align-self:stretch; background:rgba(0,0,0,.5); box-shadow:1px 0 0 rgba(255,235,205,.04); margin:0 2px;}
+
+.rgt{display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+.reset{
+  font-family:var(--mono); font-size:9px; letter-spacing:.15em; color:#a1968a;
+  padding:9px 18px; border-radius:6px; cursor:pointer;
+  background:linear-gradient(180deg,#332c25,#1b1714); border:1px solid #100d0b;
+  box-shadow:inset 0 1px 0 rgba(255,235,205,.13), 0 2px 4px rgba(0,0,0,.6);
+  transition:transform .09s ease, box-shadow .09s ease, color .18s;
+}
+.reset:hover{color:var(--ink);}
+.reset:active{transform:translateY(2px); box-shadow:inset 0 2px 5px rgba(0,0,0,.75);}
+.reset:disabled{cursor:not-allowed; opacity:.45;}
+.plate{font-family:var(--mono); font-size:8px; letter-spacing:.12em; color:#5e5549; text-align:right; line-height:1.6;}
+.plate .h{color:var(--brass);}
+
+.console{
+  font-family:var(--mono); font-size:9.5px; line-height:1.6; color:#8d8271;
+  background:#08070650; border-radius:7px; padding:8px 12px;
+  max-height:68px; overflow-y:auto;
+  border:1px solid rgba(0,0,0,.4);
+}
+.console div{white-space:pre-wrap; word-break:break-word;}
+.console .ok{color:#8fbf9c;} .console .err{color:#e2937f;} .console .warn{color:var(--amber);}
+
+@media (prefers-reduced-motion: reduce){
+  *{transition-duration:.01ms !important; animation-duration:.01ms !important; animation-iteration-count:1 !important;}
+}
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <span class="screw tl"></span><span class="screw tr"></span>
+  <span class="screw bl"></span><span class="screw br"></span>
+
+  <div class="bezel">
+    <div>
+      <div class="mark">PROMOTIONGUARD</div>
+      <div class="sub">MODEL PG&#8209;1 &nbsp;·&nbsp; CSRG&#8209;IAP INTENT ENFORCEMENT</div>
+    </div>
+    <div class="annun">
+      <div class="lamp" id="lampArmed"><i></i><span>ARMED</span></div>
+      <div class="lamp" id="lampHold"><i></i><span>HOLD</span></div>
+      <div class="lamp" id="lampBlock"><i></i><span>BLOCK</span></div>
+    </div>
+  </div>
+
+  <div class="scope">
+    <canvas id="scope"></canvas>
+    <div class="glass"></div>
+    <div class="lane-tag a" id="tagA">UNGUARDED</div>
+    <div class="lane-tag b" id="tagB">GUARDED · ARMORIQ</div>
+    <div class="ceil-tag" id="ceilTag">PLAN CEILING</div>
+  </div>
+
+  <div class="bay">
+    <div class="cell cellA" id="cellA">
+      <canvas class="gauge" id="gaugeA" width="380" height="220"></canvas>
+      <div class="readout"><b id="numA">—</b><em>VAL ROWS</em></div>
+      <div class="subread"><span>PROD PROMOTIONS</span><b id="prodA">—</b></div>
+    </div>
+    <div class="cell cellB" id="cellB">
+      <canvas class="gauge" id="gaugeB" width="380" height="220"></canvas>
+      <div class="readout"><b id="numB">—</b><em>VAL ROWS</em></div>
+      <div class="subread"><span>PROD PROMOTIONS</span><b id="prodB">—</b></div>
+    </div>
+    <div class="cell keycell" id="keycell">
+      <div class="keyhole" id="keyhole"><div class="key"><span class="head"></span><span class="bar"></span><span class="bit"></span></div></div>
+      <div class="keylabel" id="keyLabel">NO PENDING APPROVAL</div>
+      <div class="keysub" id="keySub">a human approves at platform.armoriq.ai — this dial only watches</div>
+    </div>
+  </div>
+
+  <div class="console" id="console"></div>
+
+  <div class="controls">
+    <div class="switches">
+      <button class="tog guard" id="modeToggle" aria-pressed="false">
+        <span class="track"><span class="lever"></span></span><span class="cap">GUARDED</span>
+      </button>
+      <div class="divider"></div>
+      <button class="tog" data-run="0" aria-pressed="false"><span class="track"><span class="lever"></span></span><span class="cap">HAPPY</span></button>
+      <button class="tog" data-run="1" aria-pressed="false"><span class="track"><span class="lever"></span></span><span class="cap">VIOL&#8209;1</span></button>
+      <button class="tog" data-run="2" aria-pressed="false"><span class="track"><span class="lever"></span></span><span class="cap">VIOL&#8209;2</span></button>
+    </div>
+    <div class="rgt">
+      <button class="reset" id="reset">↺ RESET</button>
+      <div class="plate">
+        <div>MODEL <span class="h" id="modelTag">cand-v7-8f3a2b</span> · 5 STEPS SEALED</div>
+        <div id="statusLine">STANDBY — FLIP A SWITCH TO RUN</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const $ = id => document.getElementById(id);
+
+  /* ───────── scope ───────── */
+  const cvs = $('scope'), ctx = cvs.getContext('2d');
+  const N = 620;
+  let W = 0, H = 0;
+  function fit(){
+    const r = cvs.getBoundingClientRect(), d = Math.min(devicePixelRatio || 1, 2);
+    W = r.width; H = r.height;
+    cvs.width = Math.round(W * d); cvs.height = Math.round(H * d);
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+  }
+  new ResizeObserver(fit).observe(cvs); fit();
+
+  const lane = () => ({ buf:new Array(N).fill(0), base:0, pulses:[], frozen:false, ceiling:0, clipGlow:0 });
+  const A = lane(), B = lane();   // A = unguarded (top, orange), B = guarded (bottom, green) — fixed roles
+  let markers = [];
+
+  function push(L){
+    let v = L.base;
+    if (!RM) v += (Math.random() - .5) * 1.6;
+    for (const p of L.pulses){
+      if (!(L.frozen && p.hold && p.age >= p.peak)) p.age += 1;
+      const s = p.mag * Math.exp(-p.age / p.decay) * Math.sin(p.age * p.freq);
+      if (s > 0) v += s;
+    }
+    L.pulses = L.pulses.filter(p => p.age < p.decay * 4.2 || (p.hold && L.frozen));
+    if (L.ceiling && v > L.ceiling){ v = L.ceiling; L.clipGlow = 1; }
+    L.buf.push(v); L.buf.shift();
+  }
+  const fire = (L, mag, o = {}) => L.pulses.push({ age:0, mag, decay:o.decay ?? 15, freq:o.freq ?? .19, hold:!!o.hold, peak:o.peak ?? 8 });
+
+  function drawLane(L, cy, color, active){
+    ctx.lineWidth = 1.6; ctx.strokeStyle = color;
+    ctx.globalAlpha = active ? 1 : .32;
+    ctx.shadowColor = color; ctx.shadowBlur = active ? 7 : 0;
+    ctx.beginPath();
+    for (let i = 0; i < N; i++){
+      const x = (i / (N - 1)) * W, y = cy - L.buf[i];
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke(); ctx.shadowBlur = 0;
+    const py = cy - L.buf[N - 1];
+    ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = active ? 10 : 0;
+    ctx.beginPath(); ctx.arc(W - 1, py, 2.6, 0, 7); ctx.fill();
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  }
+
+  let activeLaneKey = null; // 'A' | 'B' | null while idle
+
+  function frame(){
+    push(A); push(B);
+    ctx.clearRect(0, 0, W, H);
+    const cyA = H * .27, cyB = H * .74;
+
+    ctx.strokeStyle = 'rgba(255,238,214,.045)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let gx = 0; gx <= 10; gx++){ const x = (gx / 10) * W; ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let gy = 1; gy < 8; gy++){ const y = (gy / 8) * H; ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,238,214,.10)';
+    ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+
+    if (B.ceiling){
+      const y = cyB - B.ceiling;
+      ctx.save(); ctx.setLineDash([5, 5]);
+      ctx.strokeStyle = B.clipGlow > .02 ? `rgba(226,65,44,${.35 + B.clipGlow * .6})` : 'rgba(255,238,214,.16)';
+      ctx.lineWidth = B.clipGlow > .02 ? 1.7 : 1;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); ctx.restore();
+      B.clipGlow *= .94;
+    }
+
+    ctx.font = '9px "JetBrains Mono", monospace'; ctx.textAlign = 'left';
+    for (const m of markers){
+      m.idx--;
+      const x = (m.idx / (N - 1)) * W;
+      if (x < -60) continue;
+      ctx.strokeStyle = m.color + '38'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, 12); ctx.lineTo(x, H - 4); ctx.stroke();
+      ctx.fillStyle = m.color + 'cc'; ctx.fillText(m.text, x + 4, 12);
+    }
+    markers = markers.filter(m => m.idx > -70);
+
+    drawLane(A, cyA, 'rgba(240,112,58,.95)', activeLaneKey === 'A');
+    drawLane(B, cyB, 'rgba(90,196,118,.95)', activeLaneKey === 'B');
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  /* ───────── needle gauges ───────── */
+  function gauge(id, color){
+    const c = $(id), x = c.getContext('2d');
+    const w = c.width, h = c.height, cx = w / 2, cy = h * .92, R = h * .74;
+    const A0 = Math.PI * 1.06, A1 = Math.PI * 1.94;
+    const st = { v:100, target:100, vel:0 };
+    function draw(){
+      const f = (st.target - st.v) * .1; st.vel = (st.vel + f) * (RM ? 0 : .84);
+      st.v = RM ? st.target : st.v + st.vel;
+      x.clearRect(0, 0, w, h);
+      x.strokeStyle = 'rgba(255,238,214,.13)'; x.lineWidth = 2;
+      x.beginPath(); x.arc(cx, cy, R, A0, A1); x.stroke();
+      for (let i = 0; i <= 10; i++){
+        const a = A0 + (A1 - A0) * (i / 10), maj = i % 5 === 0;
+        const r1 = R - (maj ? 15 : 8);
+        x.strokeStyle = maj ? 'rgba(255,238,214,.5)' : 'rgba(255,238,214,.22)';
+        x.lineWidth = maj ? 2 : 1;
+        x.beginPath();
+        x.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+        x.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+        x.stroke();
+      }
+      x.strokeStyle = 'rgba(226,65,44,.5)'; x.lineWidth = 3;
+      x.beginPath(); x.arc(cx, cy, R - 1, A0, A0 + (A1 - A0) * .3); x.stroke();
+      x.fillStyle = 'rgba(255,238,214,.35)'; x.font = '13px "JetBrains Mono", monospace';
+      x.textAlign = 'center';
+      x.fillText('0', cx + Math.cos(A0) * (R - 30), cy + Math.sin(A0) * (R - 30) + 4);
+      x.fillText('100', cx + Math.cos(A1) * (R - 30), cy + Math.sin(A1) * (R - 30) + 4);
+      const a = A0 + (A1 - A0) * Math.max(0, Math.min(1, st.v / 100));
+      x.strokeStyle = color; x.shadowColor = color; x.shadowBlur = 9; x.lineWidth = 2.6; x.lineCap = 'round';
+      x.beginPath(); x.moveTo(cx - Math.cos(a) * 14, cy - Math.sin(a) * 14);
+      x.lineTo(cx + Math.cos(a) * (R - 12), cy + Math.sin(a) * (R - 12)); x.stroke();
+      x.shadowBlur = 0;
+      x.fillStyle = '#332c25'; x.beginPath(); x.arc(cx, cy, 9, 0, 7); x.fill();
+      x.strokeStyle = 'rgba(255,238,214,.25)'; x.lineWidth = 1; x.stroke();
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+    return st;
+  }
+  const gA = gauge('gaugeA', '#f0703a'), gB = gauge('gaugeB', '#5ac476');
+
+  /* ───────── wiring to the real backend ───────── */
+  const el = {
+    numA:$('numA'), numB:$('numB'), prodA:$('prodA'), prodB:$('prodB'),
+    armed:$('lampArmed'), hold:$('lampHold'), block:$('lampBlock'),
+    keycell:$('keycell'), keyhole:$('keyhole'), keyLabel:$('keyLabel'), keySub:$('keySub'),
+    status:$('statusLine'), ceilTag:$('ceilTag'), console:$('console'),
+    cellA:$('cellA'), cellB:$('cellB'), tagA:$('tagA'), tagB:$('tagB'),
+    modeToggle:$('modeToggle'), reset:$('reset'),
+  };
+  const scenarioBtns = [...document.querySelectorAll('.tog[data-run]')];
+
+  const setLamp = (n, on, blink) => { n.classList.toggle('on', on); n.classList.toggle('blink', !!blink); };
+  const say = t => el.status.textContent = t;
+  const mark = (text, color) => markers.push({ idx:N - 1, text, color });
+
+  function log(text, cls){
+    const line = document.createElement('div');
+    if (cls) line.className = cls;
+    line.textContent = text;
+    el.console.appendChild(line);
+    el.console.scrollTop = el.console.scrollHeight;
+    while (el.console.children.length > 40) el.console.removeChild(el.console.firstChild);
+  }
+
+  let guardedMode = false;
+  let running = false;
+
+  function setControlsEnabled(on){
+    scenarioBtns.forEach(b => b.disabled = !on);
+    el.modeToggle.disabled = !on;
+    el.reset.disabled = !on;
+  }
+
+  function paintIdleLanes(){
+    el.tagA.classList.toggle('idle', guardedMode);
+    el.tagB.classList.toggle('idle', !guardedMode);
+    el.cellA.classList.toggle('idle', guardedMode);
+    el.cellB.classList.toggle('idle', !guardedMode);
+  }
+
+  el.modeToggle.addEventListener('click', () => {
+    guardedMode = !guardedMode;
+    el.modeToggle.setAttribute('aria-pressed', String(guardedMode));
+    paintIdleLanes();
+  });
+  paintIdleLanes();
+
+  async function refreshState(){
+    try {
+      const r = await fetch('/api/state');
+      const s = await r.json();
+      applyState(s);
+    } catch (e) { /* server not up yet */ }
+  }
+
+  function applyState(s){
+    const lane = guardedMode ? 'B' : 'A';
+    const prodCount = s.promotions.filter(p => p.stage === 'production').length;
+    if (lane === 'A'){ gA.target = s.val_rows; el.numA.textContent = s.val_rows; el.prodA.textContent = prodCount; el.prodA.className = prodCount ? 'hot' : ''; }
+    else { gB.target = s.val_rows; el.numB.textContent = s.val_rows; el.prodB.textContent = prodCount; el.prodB.className = prodCount ? 'warm' : ''; }
+  }
+
+  el.reset.addEventListener('click', async () => {
+    if (running) return;
+    say('RESETTING...');
+    const r = await fetch('/api/reset', { method:'POST' });
+    const s = await r.json();
+    gA.target = s.val_rows; el.numA.textContent = s.val_rows; el.prodA.textContent = 0; el.prodA.className = '';
+    gB.target = s.val_rows; el.numB.textContent = s.val_rows; el.prodB.textContent = 0; el.prodB.className = '';
+    A.base = 0; B.base = 0; B.ceiling = 0;
+    setLamp(el.armed, false); setLamp(el.hold, false); setLamp(el.block, false);
+    el.keyhole.classList.remove('armed', 'turned'); el.keycell.classList.remove('armed');
+    el.keyLabel.textContent = 'NO PENDING APPROVAL';
+    el.keySub.textContent = 'a human approves at platform.armoriq.ai — this dial only watches';
+    log(`reset — ${s.seeded} rows seeded`, 'ok');
+    say('STANDBY — FLIP A SWITCH TO RUN');
+  });
+
+  const STEP_COLOR = { get_dataset_card:'#8d8271', read_split:'#8d8271', launch_run:'#8d8271',
+                       read_metrics:'#8d8271', promote_model:'#5ac476', delete_rows:'#f0703a' };
+
+  function handleEvent(raw, laneKey, L){
+    let obj = null;
+    try { obj = JSON.parse(raw); } catch (e) { /* not JSON */ }
+
+    if (obj && obj.__final_state__){
+      applyState(obj.__final_state__);
+      return;
+    }
+
+    if (obj && obj.verdict){
+      const color = STEP_COLOR[obj.action] || '#8d8271';
+      fire(L, obj.verdict === 'blocked' ? 44 : 24, obj.verdict === 'blocked' ? { decay:22 } : {});
+      mark(obj.action, color);
+      log(`${obj.action.padEnd(18)} ${obj.verdict}${obj.reason ? ' — ' + obj.reason : ''}`,
+          obj.verdict === 'blocked' ? 'err' : obj.verdict === 'held' ? 'warn' : 'ok');
+
+      if (obj.verdict === 'blocked' && obj.action === 'delete_rows'){
+        L.ceiling = 34; fire(L, 60, { decay:26 });
+        setLamp(el.block, true); el.ceilTag.classList.add('hot');
+        say('BLOCKED · delete_rows ABSENT FROM SIGNED PLAN');
+      }
+      if (obj.verdict === 'executed' && obj.action === 'delete_rows'){
+        L.base = -20; say('UNGUARDED · ROWS DELETED FROM THE EVAL SET');
+      }
+      if (obj.verdict === 'held'){
+        L.frozen = true; fire(L, 30, { hold:true, decay:900, peak:8 });
+        setLamp(el.hold, true, true);
+        el.keyhole.classList.add('armed'); el.keycell.classList.add('armed');
+        el.keyLabel.textContent = 'WAITING ON A HUMAN';
+        el.keySub.textContent = obj.reason || 'promote_model · stage=production';
+        say('HELD · APPROVE AT platform.armoriq.ai');
+      }
+      if (obj.verdict === 'approved'){
+        L.frozen = false;
+        setLamp(el.hold, false);
+        el.keyhole.classList.add('turned');
+        el.keyLabel.textContent = 'APPROVED';
+        el.keySub.textContent = obj.reason || 'agent resumed';
+        say('APPROVED — AGENT RESUMING');
+      }
+      return;
+    }
+
+    if (typeof raw === 'string'){
+      if (raw.startsWith('run_id=')) { say('RUNNING'); return; }
+      if (raw.startsWith('BLOCKED:')) { say(raw); log(raw, 'err'); return; }
+      if (raw.startsWith('NOT APPROVED:')) {
+        setLamp(el.hold, false);
+        el.keyLabel.textContent = 'NOT APPROVED'; el.keySub.textContent = 'timed out or rejected';
+        say(raw); log(raw, 'err'); return;
+      }
+      if (raw.startsWith('ERROR:')) { say(raw); log(raw, 'err'); return; }
+      if (raw.startsWith('done')) { say('COMPLETE'); log(raw, 'ok'); return; }
+    }
+  }
+
+  function runScenario(violation){
+    if (running) return;
+    running = true; setControlsEnabled(false);
+
+    const laneKey = guardedMode ? 'B' : 'A';
+    const L = laneKey === 'A' ? A : B;
+    activeLaneKey = laneKey;
+    L.base = 0; L.pulses = []; L.frozen = false; L.ceiling = 0;
+    setLamp(el.armed, true); setLamp(el.hold, false); setLamp(el.block, false);
+    el.ceilTag.classList.remove('hot');
+    el.keyhole.classList.remove('armed', 'turned'); el.keycell.classList.remove('armed');
+    el.keyLabel.textContent = 'NO PENDING APPROVAL';
+    el.keySub.textContent = 'a human approves at platform.armoriq.ai — this dial only watches';
+
+    const mode = guardedMode ? 'guarded' : 'unguarded';
+    say(`RUNNING · ${mode.toUpperCase()} · ${['HAPPY','VIOLATION 1','VIOLATION 2'][violation]}`);
+    log(`> agent.main --${mode}${violation ? ' --force-violation ' + violation : ''}`);
+
+    const src = new EventSource(`/api/run?mode=${mode}&violation=${violation}`);
+    src.onmessage = (e) => {
+      if (e.data === '__END__'){
+        src.close();
+        running = false; setControlsEnabled(true);
+        activeLaneKey = null;
+        setLamp(el.armed, false);
+        return;
+      }
+      handleEvent(e.data, laneKey, L);
+    };
+    src.onerror = () => {
+      src.close();
+      running = false; setControlsEnabled(true);
+      activeLaneKey = null;
+      setLamp(el.armed, false);
+      say('CONNECTION LOST');
+      log('connection to panel server lost', 'err');
+    };
+  }
+
+  scenarioBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      scenarioBtns.forEach(b => b.setAttribute('aria-pressed', 'false'));
+      btn.setAttribute('aria-pressed', 'true');
+      runScenario(Number(btn.dataset.run));
+    });
+  });
+
+  refreshState();
+})();
+</script>
+</body>
+</html>
