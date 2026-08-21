@@ -238,12 +238,58 @@ Status legend: [ ] pending  [x] done  [~] in progress/partial
 
 ## Batch 2 — COMPLETE. Both Phase 1 and Phase 3 done, everything above verified live.
 
-## Batch 3 — Phase 4 (enforcement) + Phase 5 (hold/approve/resume)
-- [ ] --guarded routes all calls through ArmorIQ, explicit allow globs
-- [ ] Violation 1 blocked, rows verified present
-- [ ] Violation 2 held (or blocked, depending on 1d answer), registry verified unchanged until approval
-- [ ] Evidence captured immediately: row-count screenshots, audit entry, Proof tab export
-- [ ] Phase 5: agent waits on hold instead of crashing, resumes after dashboard approval, timeout handling
+## Batch 3 — Phase 4 (enforcement) + Phase 5 (hold/approve/resume) — COMPLETE
+- [x] **Three blockers found and fixed, all diagnosed by live testing:**
+      1. `Session not found` on the proxy→FastMCP hop. FastMCP's HTTP transport is stateful by
+         default (`mcp-session-id`) and the proxy does not carry the session across calls. Fixed
+         with `mcp.run(..., stateless_http=True)` in all three servers.
+      2. **An intent token is bound to ONE MCP domain.** `policy_validation.domain` is taken from
+         the plan's *first step*, and only that domain's policy matches — calls to any other
+         domain hit `default_enforcement_action: block` and die
+         (`Tool 'launch_run' denied by OPA: policy_constraints_not_satisfied`). Proved by minting
+         a jobs-first plan and watching `domain` flip. With three tunnels, one signed plan could
+         only ever reach one server. **Fix: `mcp_servers/app.py` mounts all three FastMCP apps on
+         one origin under `/dataset`, `/jobs`, `/registry`, behind one tunnel.** Re-tested: all
+         three policies match one token and calls to all three servers succeed. The servers stay
+         three separate modules with three separate registry entries and policies — only the
+         origin is shared.
+      3. Session-unique MCP ids (already known from Batch 2) — cloudflared mints a new URL every
+         start, and re-registering an existing id with a new URL 500s.
+- [x] `agent/infra.py` — one command: ensures cloudflared (auto-downloads per-platform on first
+      run into `.tools/`), starts the bundled MCP origin, opens one tunnel, registers all three
+      servers with session-unique ids + explicit fail-closed allow list, writes `.session.json`,
+      tears everything down on Ctrl-C.
+- [x] `agent/main.py` refactored to an executor seam (`DirectExecutor` / `GuardedExecutor`) so
+      `run_organic` and `run_deterministic` are shared **verbatim** between modes — CLAUDE.md
+      rule 3 (identical behaviour except enforcement) now holds structurally, not by discipline.
+      `GuardedExecutor` also unwraps the MCP `{"content":[{"text":...}]}` envelope so the LLM sees
+      identically-shaped observations in both modes.
+- [x] `--hold-timeout` flag; clean `BLOCKED:` (exit 2) / `NOT APPROVED:` (exit 3) handling instead
+      of tracebacks; friendly error when `.session.json` is missing.
+- [x] `agent/plan.py` — `build_plan(server_map)` swaps logical MCP names for session ids.
+      **Action names never change**, which is what preserves the violation semantics.
+- [x] **Happy path under enforcement PASSED** — all 5 steps executed through the real
+      `proxy.armoriq.ai`, staging promotion landed, 100 rows untouched.
+- [x] **Violation 1 PASSED** — `delete_rows` verdict `blocked`, exit 2, val split still exactly
+      100 rows. Rows genuinely survived.
+- [x] **Violation 2 PASSED, full cycle, live** — `held` at 19:41:54 → human approved from the
+      ArmorIQ dashboard → `approved` at 19:44:28 ("approved by garvnanda326@gmail.com") →
+      `executed` at 19:44:29. The `production` row in `promotions` is timestamped 19:44:29,
+      i.e. **after** the approval. Timeout path separately verified: with `--hold-timeout 20` and
+      no approval it exits 3 and `promotions` stays empty.
+- [x] `tests/verify_guarded.py` — asserts all three outcomes unattended, ends `ALL CHECKS PASSED`.
+- [x] Evidence captured to `evidence/logs/` (three real run logs + `evidence/README.md`) AND
+      `evidence/screenshots/` — four real dashboard screenshots, captured live via browser
+      automation against a genuinely pending held action (not staged/faked): Held Actions
+      "Needs you", the plan detail while still held, the 5-step flow graph, and the
+      "Approved by admin" state immediately after clicking Approve. Timestamps in the screenshot
+      session (held 20:02:07 → approved 20:05:47 → executed 20:05:49) match the log file exactly.
+- [x] **Overclaiming fixed at the source, not just flagged.** `docs/idea.md` and `docs/technical.md`
+      (two spots) said blocking "fails at the proxy" — corrected to state what Batch 3 actually
+      verified: `IntentMismatchException` fires client-side inside the SDK, before any HTTP
+      request leaves the agent process. Enforcement is still real and fail-closed; the claim is
+      just now accurate. `[VERIFIED, Batch 3]` tags mark the corrected lines so a future read
+      doesn't mistake them for the original unverified draft.
 
 ## Batch 4 — Phase 6 (panel) + Phase 7 (README/demo/video)
 - [ ] panel/ — plain HTML/CSS/JS, split screen unguarded vs guarded

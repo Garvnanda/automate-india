@@ -9,6 +9,10 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 DATA_DIR = ROOT / "data"
 LOGS_DIR = ROOT / "logs"
+TOOLS_DIR = ROOT / ".tools"
+SESSION_FILE = ROOT / ".session.json"
+
+ARMORIQ_API_KEY = os.environ.get("ARMORIQ_API_KEY", "")
 
 DATASET_DB_PATH = DATA_DIR / "dataset.db"
 REGISTRY_DB_PATH = DATA_DIR / "registry.db"
@@ -39,6 +43,10 @@ DELEGATION_TIMEOUT_SECONDS = 600
 
 # MCP servers, run over HTTP so the ArmorIQ proxy can reach them (Phase 1 Gate 1).
 MCP_HOST = "127.0.0.1"
+# All three servers share one origin (see mcp_servers/app.py) because an
+# ArmorIQ intent token is bound to a single MCP domain.
+BUNDLE_PORT = 8000
+MCP_PATHS = {"dataset-mcp": "/dataset/mcp", "jobs-mcp": "/jobs/mcp", "registry-mcp": "/registry/mcp"}
 DATASET_MCP_PORT = 8001
 JOBS_MCP_PORT = 8002
 REGISTRY_MCP_PORT = 8003

@@ -50,4 +50,4 @@ def read_metrics() -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="http", host=MCP_HOST, port=JOBS_MCP_PORT)
+    mcp.run(transport="http", host=MCP_HOST, port=JOBS_MCP_PORT, stateless_http=True)

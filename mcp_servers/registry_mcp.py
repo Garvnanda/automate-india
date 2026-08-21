@@ -40,4 +40,4 @@ def promote_model(model_hash: str, stage: str) -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="http", host=MCP_HOST, port=REGISTRY_MCP_PORT)
+    mcp.run(transport="http", host=MCP_HOST, port=REGISTRY_MCP_PORT, stateless_http=True)

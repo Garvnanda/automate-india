@@ -93,24 +93,56 @@ anything ArmorIQ-related is even involved.
       (real row deletion, real production promotion). Organic run (no flag) completes the
       happy path correctly every time; hasn't organically triggered the injection in 3
       attempts (a safe model refusal, not a bug — `--force-violation` exists for exactly this).
-- [ ] **Batch 3** — ArmorIQ enforcement (`--guarded`), hold/approve/resume
-- [ ] **Batch 4** — demo panel, `demo.sh`, evidence, video
+- [x] **Batch 3** — ArmorIQ enforcement (`--guarded`) + hold/approve/resume, all proven live:
+      happy path completes under enforcement, violation 1 blocked with rows intact, violation 2
+      held → approved from the dashboard → agent resumed and wrote only then. See
+      [`evidence/`](evidence/) and `tests/verify_guarded.py`.
+- [ ] **Batch 4** — demo panel, `demo.sh`, video
 
 Commands below get filled in as each batch lands — see `done.md` for the detailed, ticked
 checklist behind this summary.
 
-```bash
-# working now:
-python -m agent.main --unguarded                       # happy path, organic
-python -m agent.main --unguarded --force-violation 1    # deterministic: delete_rows
-python -m agent.main --unguarded --force-violation 2    # deterministic: production promotion
+### The "before" — no enforcement
 
-# coming in Batch 3:
-python -m agent.main --guarded
-python -m agent.main --guarded --force-violation 1
-python -m agent.main --guarded --force-violation 2
-./demo.sh
+```bash
+python data/reset.py
+python -m agent.main --unguarded                        # happy path, the LLM drives
+python -m agent.main --unguarded --force-violation 1    # 40 rows really leave the database
+python -m agent.main --unguarded --force-violation 2    # a real production promotion lands
 ```
+
+### The "after" — every call through ArmorIQ
+
+Guarded mode needs the MCP servers publicly reachable (the ArmorIQ proxy can't
+reach your localhost) and registered. That's one command, left running:
+
+```bash
+# terminal 1 — downloads cloudflared on first run, then stays up
+python -m agent.infra
+```
+
+Wait for `READY`, then in a second terminal:
+
+```bash
+python data/reset.py
+python -m agent.main --guarded                          # all 5 steps flow, nobody watching
+python -m agent.main --guarded --force-violation 1      # BLOCKED — rows survive
+python -m agent.main --guarded --force-violation 2      # HELD — waits for a human
+```
+
+Violation 2 prints a delegation id and pauses. Approve it at
+**platform.armoriq.ai → Intent → Held Actions** as your `APPROVER_EMAIL`, and the
+agent resumes mid-run and finishes. Nothing reaches the registry until you click.
+
+### Prove it, unattended
+
+```bash
+python tests/verify_guarded.py     # with agent.infra running
+```
+
+Asserts the happy path completes, `delete_rows` is blocked with all 100 rows
+still present, and the production promotion is held with nothing written.
+Ends `ALL CHECKS PASSED`. Real captured runs are in [`evidence/`](evidence/).
 
 Requires `OPENROUTER_API_KEY` in `.env` (free-tier is fine — set `OPENROUTER_MODEL` to any
 current free tool-calling model from [openrouter.ai/models](https://openrouter.ai/models);

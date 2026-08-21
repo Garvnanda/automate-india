@@ -18,16 +18,24 @@ import uuid
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from armoriq_sdk.exceptions import (
+    IntentMismatchException,
+    PolicyBlockedException,
+    PolicyHoldException,
+)
+
+from agent.armoriq_client import ArmorGuard
 from agent.config import (
     CANDIDATE_HASH,
     DATASET_DB_PATH,
     EVAL_SPLIT,
     OPENROUTER_API_KEY,
     OPENROUTER_MODEL,
+    SESSION_FILE,
     THRESHOLD,
 )
 from agent.logging import log_event
-from agent.plan import PLAN_GOAL, PLAN_STEPS
+from agent.plan import PLAN_GOAL, PLAN_STEPS, build_plan
 from mcp_servers import dataset_mcp, jobs_mcp, registry_mcp
 
 MAX_ITERS = 10
@@ -132,14 +140,58 @@ def _call_openrouter(messages):
     raise RuntimeError(f"OpenRouter failed after 3 attempts: {last_error}")
 
 
-def _execute_tool(run_id, mode, step, tool_name, args):
-    mcp, fn = TOOL_REGISTRY[tool_name]
-    result = fn(**args)
-    log_event(run_id, mode, step, tool_name, mcp, args, "executed", "")
-    return result
+class DirectExecutor:
+    """--unguarded: straight into the MCP server functions, in-process."""
+
+    mode = "unguarded"
+
+    def __init__(self, run_id):
+        self.run_id = run_id
+
+    def call(self, mcp, action, params, step):
+        _, fn = TOOL_REGISTRY[action]
+        result = fn(**params)
+        log_event(self.run_id, self.mode, step, action, mcp, params, "executed", "")
+        return result
 
 
-def run_organic(run_id, mode):
+class GuardedExecutor:
+    """--guarded: every call routed through ArmorIQ first. Same reasoning, same
+    prompts, same tool sequence as DirectExecutor — enforcement is the only
+    difference, which is what makes the before/after comparison worth anything."""
+
+    mode = "guarded"
+
+    def __init__(self, run_id, hold_timeout=None):
+        if not SESSION_FILE.exists():
+            raise SystemExit(
+                "no .session.json — guarded mode needs the MCP servers tunneled and\n"
+                "registered first. In another terminal run:\n\n    python -m agent.infra\n"
+            )
+        session = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+        self.map = {name: s["id"] for name, s in session["servers"].items()}
+        self.guard = ArmorGuard(
+            run_id, build_plan(self.map), llm_name=OPENROUTER_MODEL, hold_timeout=hold_timeout
+        )
+
+    @staticmethod
+    def _unwrap(result):
+        """MCP wraps returns as {"content":[{"type":"text","text":"..."}]}.
+        Unwrap so the model sees the same shape it sees unguarded."""
+        if isinstance(result, dict) and isinstance(result.get("content"), list):
+            for item in result["content"]:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    try:
+                        return json.loads(item["text"])
+                    except (json.JSONDecodeError, TypeError):
+                        return item["text"]
+        return result
+
+    def call(self, mcp, action, params, step):
+        return self._unwrap(self.guard.call(self.map.get(mcp, mcp), action, params, step))
+
+
+def run_organic(ex):
     """Full LLM tool-calling loop — the model decides everything, including
     whether it reaches for delete_rows or a production promotion on its own."""
     messages = [
@@ -164,7 +216,7 @@ def run_organic(run_id, mode):
             if name not in TOOL_REGISTRY:
                 result = {"error": f"unknown tool {name!r}"}
             else:
-                result = _execute_tool(run_id, mode, step, name, args)
+                result = ex.call(TOOL_REGISTRY[name][0], name, args, step)
                 step += 1
             messages.append({
                 "role": "tool",
@@ -174,7 +226,7 @@ def run_organic(run_id, mode):
     return step
 
 
-def run_deterministic(run_id, mode, force_violation):
+def run_deterministic(ex, force_violation):
     """Scripted run of the fixed plan, with one violation injected — the
     demo path that doesn't depend on the model's mood."""
     step = 0
@@ -182,7 +234,7 @@ def run_deterministic(run_id, mode, force_violation):
         args = dict(planned["params"])
         if force_violation == 2 and planned["action"] == "promote_model":
             args["stage"] = "production"
-        _execute_tool(run_id, mode, step, planned["action"], args)
+        ex.call(planned["mcp"], planned["action"], args, step)
         step += 1
 
     if force_violation == 1:
@@ -194,7 +246,7 @@ def run_deterministic(run_id, mode, force_violation):
             )
         ]
         conn.close()
-        _execute_tool(run_id, mode, step, "delete_rows", {"row_ids": noisy_ids})
+        ex.call("dataset-mcp", "delete_rows", {"row_ids": noisy_ids}, step)
         step += 1
 
     return step
@@ -204,21 +256,35 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--unguarded", action="store_true", help="direct MCP calls, no ArmorIQ")
-    group.add_argument("--guarded", action="store_true", help="routed through ArmorIQ (Batch 3)")
+    group.add_argument("--guarded", action="store_true", help="every call routed through ArmorIQ")
     parser.add_argument("--force-violation", type=int, choices=[1, 2], default=None)
+    parser.add_argument(
+        "--hold-timeout", type=float, default=None,
+        help="seconds to wait for a human to approve a held action",
+    )
     args = parser.parse_args()
 
-    if args.guarded:
-        raise SystemExit("--guarded is not implemented yet (Batch 3). Use --unguarded.")
-
-    mode = "unguarded"
     run_id = uuid.uuid4().hex[:12]
-    print(f"run_id={run_id} mode={mode} force_violation={args.force_violation}")
+    ex = (
+        GuardedExecutor(run_id, hold_timeout=args.hold_timeout)
+        if args.guarded
+        else DirectExecutor(run_id)
+    )
+    print(f"run_id={run_id} mode={ex.mode} force_violation={args.force_violation}")
 
-    if args.force_violation:
-        n = run_deterministic(run_id, mode, args.force_violation)
-    else:
-        n = run_organic(run_id, mode)
+    try:
+        if args.force_violation:
+            n = run_deterministic(ex, args.force_violation)
+        else:
+            n = run_organic(ex)
+    except (IntentMismatchException, PolicyBlockedException) as e:
+        print(f"\nBLOCKED: {e}")
+        print(f"the call never left the agent — log at logs/{run_id}.jsonl")
+        raise SystemExit(2)
+    except PolicyHoldException as e:
+        print(f"\nNOT APPROVED: {e}")
+        print(f"nothing was written — log at logs/{run_id}.jsonl")
+        raise SystemExit(3)
 
     print(f"done — {n} tool calls, log at logs/{run_id}.jsonl")
 

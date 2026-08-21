@@ -33,7 +33,7 @@ That is the whole project: an agent that moves fast on everything inside its dec
 **The destructive artifacts are real.** Rows genuinely disappear from a SQLite labels table. A wrong promotion genuinely lands in the registry. Run it unguarded and the damage is on disk — which is the bar the track sets: *"'It would have deleted the table' proves nothing."*
 
 **It maps onto ArmorIQ's two enforcement mechanisms cleanly**, one each:
-- Violation 1 → **hard block.** `delete_rows` is not in the signed plan; step verification fails at the proxy.
+- Violation 1 → **hard block.** `delete_rows` is not in the signed plan; the SDK checks the action against the captured plan client-side and refuses before any request leaves the agent process — the call never reaches the proxy or the database.
 - Violation 2 → **human-in-the-loop hold.** Promoting to production exceeds the agent's role authority; ArmorIQ raises a delegation request, the plan goes to `held`, a higher-ranked human approves from the dashboard, and the agent resumes mid-run.
 
 That second one is the demo. It is the exact sequence the track asks for — *"deliberately trigger an out-of-scope action and watch it get caught and held — before it executes. Then approve it from the dashboard and watch the agent continue."*

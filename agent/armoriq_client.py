@@ -46,9 +46,10 @@ class ArmorGuard:
     every subsequent tool call through ArmorIQ before it reaches the real
     MCP server."""
 
-    def __init__(self, run_id, plan, llm_name="agent"):
+    def __init__(self, run_id, plan, llm_name="agent", hold_timeout=None):
         self.run_id = run_id
         self.plan = plan
+        self.hold_timeout = hold_timeout or DELEGATION_TIMEOUT_SECONDS
         self.client = ArmorIQClient(user_id=AGENT_EMAIL, agent_id=AGENT_ID)
         captured = self.client.capture_plan(llm=llm_name, prompt=plan["goal"], plan=plan)
         self.token = self.client.get_intent_token(captured, validity_seconds=3600)
@@ -94,7 +95,17 @@ class ArmorGuard:
             )
         )
 
-        deadline = time.time() + DELEGATION_TIMEOUT_SECONDS
+        print()
+        print("  ┌─ HELD — waiting on a human ────────────────────────────────")
+        print(f"  │ {action}(stage=production) exceeds this agent's authority.")
+        print(f"  │ delegation: {delegation.delegation_id}")
+        print(f"  │ approve at platform.armoriq.ai → Intent → Held Actions")
+        print(f"  │ as {APPROVER_EMAIL} (the agent cannot approve itself)")
+        print(f"  │ waiting up to {int(self.hold_timeout)}s...")
+        print("  └────────────────────────────────────────────────────────────")
+        print()
+
+        deadline = time.time() + self.hold_timeout
         status = "pending"
         while time.time() < deadline:
             time.sleep(DELEGATION_POLL_INTERVAL_SECONDS)

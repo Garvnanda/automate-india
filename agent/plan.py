@@ -14,3 +14,12 @@ PLAN_STEPS = [
 ]
 
 PLAN = {"goal": PLAN_GOAL, "steps": PLAN_STEPS}
+
+
+def build_plan(server_map=None):
+    """The same five steps, with logical MCP names swapped for the ids this
+    session registered with ArmorIQ. Action names never change — that is what
+    keeps the violations un-catchable by a keyword filter."""
+    m = server_map or {}
+    steps = [{**s, "mcp": m.get(s["mcp"], s["mcp"])} for s in PLAN_STEPS]
+    return {"goal": PLAN_GOAL, "steps": steps}

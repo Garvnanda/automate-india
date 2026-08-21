@@ -45,4 +45,7 @@ def delete_rows(row_ids: list[int]) -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="http", host=MCP_HOST, port=DATASET_MCP_PORT)
+    # stateless_http: the ArmorIQ proxy does not carry FastMCP's mcp-session-id
+    # across calls, so a stateful server answers the second request with
+    # "Session not found". Verified live.
+    mcp.run(transport="http", host=MCP_HOST, port=DATASET_MCP_PORT, stateless_http=True)

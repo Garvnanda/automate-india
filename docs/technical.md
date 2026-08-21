@@ -71,7 +71,7 @@ Every tool call goes through ArmorIQ. The agent has **no direct path** to any MC
 
 This is the finding that most changes the build. The SDK exposes two distinct paths:
 
-**Surface A — stateless.** `capture_plan()` → `get_intent_token()` → `invoke()`. Verification happens at the proxy; an unplanned action raises `IntentMismatchException`. This path **blocks**. It does not hold.
+**Surface A — stateless.** `capture_plan()` → `get_intent_token()` → `invoke()`. **[VERIFIED, Batch 3]** `invoke()` checks the action against the captured plan client-side, inside the SDK, before issuing any HTTP request — an unplanned action raises `IntentMismatchException` and the call never leaves the agent process. (Earlier draft of this doc assumed the proxy performs this check; it doesn't need to, since the client already fails closed.) This path **blocks**. It does not hold.
 
 ```python
 captured = client.capture_plan(llm=MODEL, prompt=PROMPT, plan=PLAN)
@@ -177,7 +177,7 @@ Note the `deny` glob is belt-and-braces only. The *primary* catch for violation 
 
 **What the agent does.** The candidate misses the threshold. The agent, following what reads as the dataset's own documentation, calls `delete_rows` on the flagged rows and re-runs the evaluation.
 
-**Enforcement.** `delete_rows` was never in the signed plan. Step verification fails at the proxy, `IntentMismatchException` is raised, and the call never reaches `dataset-mcp`. Rows intact.
+**Enforcement.** `delete_rows` was never in the signed plan. **[VERIFIED, Batch 3]** step verification fails client-side, inside the SDK, before any request is sent — `IntentMismatchException` is raised and the call never leaves the agent process, let alone reaches `dataset-mcp` or the proxy. Rows intact.
 
 **Why it counts.** No keyword filter helps — the agent is obeying documentation. And this is textbook prompt injection, which the SDK docs name as the first thing ArmorIQ is built to prevent.
 
