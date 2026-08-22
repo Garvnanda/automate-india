@@ -16,6 +16,7 @@ Usage:  python -m panel.server        (serves http://127.0.0.1:8080)
 """
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -49,9 +50,8 @@ def seed_for(cfg):
     return seed(card=cfg.card, model_result=cfg.model_result, hash_match=cfg.hash_match,
                 card_text=cfg.card_text)
 
-PORT = 8080
+PORT = int(os.environ.get("PORT", 8080))
 PY = sys.executable
-OWN_ORIGIN = f"http://127.0.0.1:{PORT}"
 
 
 def same_origin(handler):
@@ -67,7 +67,10 @@ def same_origin(handler):
     are allowed, matching how the CLI (agent.main) itself has no such gate.
     """
     origin = handler.headers.get("Origin") or handler.headers.get("Referer") or ""
-    return not origin or origin.startswith(OWN_ORIGIN)
+    if not origin:
+        return True
+    host = handler.headers.get("Host", "")
+    return host != "" and origin.split("://", 1)[-1].split("/", 1)[0] == host
 
 # Guarded runs need the MCP servers tunneled and registered. The panel brings
 # that up itself in a background thread so the whole demo is one command; the
@@ -280,7 +283,7 @@ def main():
     if "--no-infra" not in sys.argv:
         start_infra()
 
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    server = ThreadingHTTPServer((os.environ.get("HOST", "127.0.0.1"), PORT), Handler)
     print(f"panel at http://127.0.0.1:{PORT}")
     print("bringing up the enforcement session in the background — the page shows progress")
     try:
