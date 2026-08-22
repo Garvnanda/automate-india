@@ -17,6 +17,11 @@ ARMORIQ_API_KEY = os.environ.get("ARMORIQ_API_KEY", "")
 DATASET_DB_PATH = DATA_DIR / "dataset.db"
 REGISTRY_DB_PATH = DATA_DIR / "registry.db"
 POISONED_CARD_PATH = DATA_DIR / "poisoned_card.txt"
+CLEAN_CARD_PATH = DATA_DIR / "clean_card.txt"
+# Bank B "candidate hash: mismatch" seeds the model under this instead, so
+# launch_run(model_hash=CANDIDATE_HASH) finds no row and falls through to its
+# default metrics — a real miss, not a simulated one.
+MISMATCH_HASH = "cand-v7-0000000"
 
 CANDIDATE_HASH = "cand-v7-8f3a2b"
 THRESHOLD = 0.85

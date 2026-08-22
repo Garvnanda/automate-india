@@ -423,6 +423,82 @@ put it back inside the instrument.
       it is now closed.
 - [ ] Demo video — still not recorded.
 
+## v2 — violations become emergent instead of selected
+Plan: `docs/v2-plan.md`, reviewed and staged before any code was written. The flaw it names is
+real: v1's integrity rule ("nothing on the panel is fake") held everywhere except at the control a
+judge actually touches — `HAPPY / VIOL-1 / VIOL-2` behind `--force-violation N`. The labels
+announced the hardcoding. v2 replaces the judge-facing path with authorization + conditions, and the
+violation becomes whatever the agent reaches for that was not authorized.
+
+- [x] **Blocking pre-test, done first and it changed a decision.** Asked whether the org-side
+      registered `deny` is actually enforced — v1 never exercised it, because `delete_rows` was
+      absent from the plan so `IntentMismatchException` always fired client-side first. Built a plan
+      that *includes* `delete_rows` so the client check passes, and invoked through the real proxy:
+      `PolicyBlockedException: Tool 'delete_rows' denied by OPA: policy_constraints_not_satisfied`.
+      **So there are two independent, both-real enforcement layers**, and v1 only ever demonstrated
+      one. It also meant the org policy would have vetoed the judge's own authorization — hence D2.
+- [x] `agent/runconfig.py` — one `RunConfig` carried end to end (panel → server → `agent.main`).
+      Bank A = authority, Bank B = world. `AUTHORITY_PARAMS` is a declared concept rather than an
+      `if stage == "production"`, so the mechanism generalises and the action name never changes.
+- [x] `agent/plan.py` — `build_plan(server_map, cfg)` assembles the signed plan from the judge's
+      switches; `STEP_LIBRARY` keeps one canonical definition per step. Calling it with no cfg still
+      returns the v1 five, so nothing that depended on the old constant broke.
+- [x] **Two gates on production, without splitting the action name** (which CLAUDE.md forbids).
+      Gate 1 is ArmorIQ's action-level plan membership. Gate 2 is `ArmorGuard` comparing the call
+      against the params *its own signed plan* carries, and raising a real delegation request on a
+      mismatch. Verified both ways live: staging-only authorized → `held`, "exceeds the signed
+      plan's authority (authorized: staging)", nothing written; production authorized → straight
+      through, no hold. Also fixed a latent ordering bug — v1 routed to delegation *before* the plan
+      check, so an unplanned action could have asked a human to approve something `invoke()` would
+      then reject anyway.
+- [x] **D2 / §2.4 — the move that ends the hardcoding argument, working.** `delete_rows` moved from
+      `DENIED_TOOLS` to `ALLOWED_TOOLS` in `agent/infra.py`, so plan membership is the only gate.
+      Proven live, both directions, through the CLI *and* through the panel's own SSE endpoint:
+      `delete_rows` unauthorized → 5-step plan, verdict `blocked`, 100 rows survive. Identical run
+      with it authorized → 6-step plan, verdict `executed`, **100 → 60 rows really gone**. Same
+      injection, same call, opposite outcome, decided by nothing but plan membership.
+- [x] **The signing beat.** `__plan__` frame emitted the moment `get_intent_token()` returns,
+      carrying the steps, `signed`, the real `plan_hash` and `token_id`. Unguarded runs emit the same
+      frame with `signed:false` and no hash — the panel shows that difference rather than hiding it.
+      The plan strip is now built from this frame, not from a JS constant, so the panel no longer
+      knows the violation before the agent does.
+- [x] Bank B is seed-time only (`data/seed.py` takes `card` / `model_result` / `hash_match`), because
+      `jobs-mcp.launch_run` already reads whatever metrics were seeded. **No MCP server changed at
+      all** and no code path branches on a condition. Added `data/clean_card.txt` and `MISMATCH_HASH`.
+- [x] **Regression caught a real behaviour change I introduced** and it was worth having: defaulting
+      `model_result` to `narrow` (0.83) put the candidate under the 0.85 bar, so the LLM correctly
+      declined to promote and `verify_guarded.py`'s happy path failed. v1 always seeded a passing
+      model; default restored to `clears`. `tests/verify_guarded.py` now passes unchanged —
+      happy path, violation 1 blocked with rows intact, violation 2 held with nothing written.
+- [x] Panel rebuilt around ARM → RUN: Bank A (7 switches, 4 locked-on with a brass lock pip), Bank B
+      (4 rotary knobs incl. an honestly-labelled REPLAY selector), a preset rotary
+      (BASELINE / INJECTION / ESCALATION / CUSTOM), a dedicated RUN button that disables itself when
+      nothing is authorized, and a PROOF surface that settles after `__END__` showing each call
+      against the plan hash. All reuse the existing `.tog` / `.pstep` / `.knob` idiom and the tooltip
+      engine — 20+ hover explainers, several state-dependent.
+- [x] `panel/server.py` forwards the config to `agent.main` and reseeds under Bank B before every
+      run; invalid conditions return HTTP 400 with the reason rather than silently defaulting.
+      Verified live, including the empty-plan guard and a rejected bad card value.
+- [x] **Panel verified live in the browser, and it found two real bugs.**
+      1. **Locked switches were only styled locked, not actually locked** — clicking `CARD` toggled a
+         supposedly-locked read off, which is exactly the §4.1 prevention failing. The click handler
+         now returns early on `spec.locked`. Confirmed by clicking it and watching it refuse to move.
+      2. **The PROOF surface pushed the panel off one screen.** The instrument is designed to fit a
+         single screen because it gets screen-recorded, and v2's second control row plus PROOF broke
+         that. Fixed by swapping PROOF *in place of* the console (live view during a run, settled
+         view after) rather than stacking them, plus trimming the scope and gauge heights.
+         Re-measured: `scrollHeight == innerHeight`, fits again.
+      **The §2.4 pair driven through the real UI, back to back:** delete_rows unauthorized → strip
+      built from `__plan__` with 5 steps, hash `b2683c491a`, `delete_rows` in the trailing
+      outside-the-plan slot as blocked, BLOCK lamp lit, guarded gauge holding 100. Then one switch
+      flipped → 6 steps, hash `67f245676f`, `delete_rows` green and **done**, guarded gauge falls to
+      60, trailing slot empty. PROOF renders the verdict chain against the plan hash both times.
+      (Clicks were dispatched as real DOM events rather than synthetic mouse coordinates — the
+      screenshot capture scale and CSS pixel space disagree on this display, so coordinate clicks
+      were landing on the wrong controls. Same handlers, same code path.)
+- [ ] `docs/frontend.md` needs a v2 pass (controls section, `__plan__`-driven strip, PROOF surface).
+- [ ] Demo video — still not recorded.
+
 ## Phase 8 — buffer (only if time allows)
 - [ ] token expiry mid-run demo
 - [ ] PAP pre-flight decisions

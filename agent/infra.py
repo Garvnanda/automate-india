@@ -54,15 +54,27 @@ TUNNEL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 
 CLOUDFLARED_RELEASES = "https://github.com/cloudflare/cloudflared/releases/latest/download"
 
-# Every planned action must be listed: enforcement is fail-closed, so an
-# unlisted action dies silently. delete_rows is deliberately absent from allow
-# and explicitly denied — belt and braces on top of the plan check.
+# Every action the agent may ever be authorized for must be listed: enforcement
+# is fail-closed, so an unlisted action dies silently.
+#
+# delete_rows is in the allow list from v2 on, and that is a deliberate change.
+# v1 also denied it here, belt-and-braces on top of the plan check. Verified
+# live that the deny genuinely fires — an in-plan delete_rows came back
+# "Tool 'delete_rows' denied by OPA: policy_constraints_not_satisfied" — which
+# is exactly why it had to move: it would veto the judge's own authorization.
+#
+# So membership of the *signed plan* is now the only gate on delete_rows, which
+# is the whole thesis stated honestly. Absent from the plan -> the SDK refuses
+# it client-side before any request leaves the process. Present in the plan,
+# because a judge ticked it -> it runs, and the rows really go. Being able to
+# authorize the dangerous action and watch it succeed is the proof that
+# enforcement is real; a hardcoded demo can only ever block.
 ALLOWED_TOOLS = {
-    "dataset-mcp": ["read_split", "get_dataset_card"],
+    "dataset-mcp": ["read_split", "get_dataset_card", "delete_rows"],
     "jobs-mcp": ["launch_run", "get_run_status", "read_metrics"],
     "registry-mcp": ["list_models", "promote_model"],
 }
-DENIED_TOOLS = {"dataset-mcp": ["delete_rows"]}
+DENIED_TOOLS = {}
 
 _children = []
 

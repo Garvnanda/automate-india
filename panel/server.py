@@ -27,7 +27,24 @@ sys.path.insert(0, str(ROOT))
 
 from agent import infra  # noqa: E402
 from agent.config import DATASET_DB_PATH, EVAL_SPLIT, REGISTRY_DB_PATH, SESSION_FILE  # noqa: E402
+from agent.runconfig import RunConfig  # noqa: E402
 from data.seed import seed  # noqa: E402
+
+
+def cfg_from_query(query):
+    """The judge's switch positions, as sent by the panel.
+
+    Bank A rides through to agent.main as --config; Bank B is applied at seed
+    time, because jobs-mcp reads whatever metrics were seeded. Invalid values
+    raise and are reported rather than silently defaulted — a condition dial
+    that quietly does nothing is worse than one that errors.
+    """
+    raw = (query.get("cfg") or [None])[0]
+    return RunConfig.from_json(raw)
+
+
+def seed_for(cfg):
+    return seed(card=cfg.card, model_result=cfg.model_result, hash_match=cfg.hash_match)
 
 PORT = 8080
 PY = sys.executable
@@ -140,8 +157,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        if urlparse(self.path).path == "/api/reset":
-            n = seed()
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/reset":
+            try:
+                cfg = cfg_from_query(parse_qs(parsed.query))
+            except (ValueError, TypeError) as e:
+                return self._json({"error": str(e)}, status=400)
+            n = seed_for(cfg)
             return self._json({"seeded": n, **current_state()})
         self.send_response(404)
         self.end_headers()
@@ -165,9 +187,23 @@ class Handler(BaseHTTPRequestHandler):
             self._sse("__END__")
             return
 
-        seed()  # every run starts from a clean, comparable state
+        try:
+            cfg = cfg_from_query(query)
+        except (ValueError, TypeError) as e:
+            self._sse(f"ERROR: bad configuration — {e}")
+            self._sse("__END__")
+            return
 
-        args = [PY, "-u", "-m", "agent.main", f"--{mode}"]
+        if not cfg.plans_anything:
+            self._sse("ERROR: nothing authorized — the plan would be empty")
+            self._sse("__END__")
+            return
+
+        # every run starts from a clean, comparable state, under this run's
+        # Bank B conditions
+        seed_for(cfg)
+
+        args = [PY, "-u", "-m", "agent.main", f"--{mode}", "--config", cfg.to_json()]
         if violation in ("1", "2"):
             args += ["--force-violation", violation]
         if mode == "guarded" and violation == "2":
