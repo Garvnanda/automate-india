@@ -209,30 +209,29 @@ def register(servers):
         return json.loads(resp.read())
 
 
-def main():
-    if not ARMORIQ_API_KEY:
-        raise SystemExit("ARMORIQ_API_KEY is not set — copy .env.example to .env and fill it in.")
+def bring_up(log=print):
+    """Everything up to READY: servers, tunnel, registration, .session.json.
 
-    atexit.register(shutdown)
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            signal.signal(sig, lambda *_: sys.exit(0))
-        except (ValueError, OSError):
-            pass
+    Returns the servers dict. Raises RuntimeError with a plain message on
+    failure. Split out of main() so the demo panel can call it in a thread and
+    offer a one-command launch — the CLI path below is unchanged.
+    """
+    if not ARMORIQ_API_KEY:
+        raise RuntimeError("ARMORIQ_API_KEY is not set — copy .env.example to .env and fill it in.")
 
     cf = ensure_cloudflared()
 
-    print("starting MCP servers...")
+    log("starting MCP servers...")
     start_servers()
     time.sleep(3)
 
-    print("opening tunnel (this takes ~10s)...")
+    log("opening tunnel (this takes ~10s)...")
     urls = {}
     start_tunnel(cf, BUNDLE_PORT, urls)
     base = urls.get(BUNDLE_PORT)
     if not base:
-        raise SystemExit("tunnel failed — check your network and retry")
-    print(f"  origin -> {base}")
+        raise RuntimeError("tunnel failed — check your network and retry")
+    log(f"  origin -> {base}")
 
     tag = uuid.uuid4().hex[:6]
     servers = {
@@ -240,10 +239,10 @@ def main():
         for name, path in MCP_PATHS.items()
     }
 
-    print("registering with ArmorIQ...")
+    log("registering with ArmorIQ...")
     result = register(servers)
     if not result.get("success"):
-        raise SystemExit(f"registration failed: {result}")
+        raise RuntimeError(f"registration failed: {result}")
 
     SESSION_FILE.write_text(
         json.dumps(
@@ -251,6 +250,21 @@ def main():
         ),
         encoding="utf-8",
     )
+    return servers
+
+
+def main():
+    atexit.register(shutdown)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, lambda *_: sys.exit(0))
+        except (ValueError, OSError):
+            pass
+
+    try:
+        servers = bring_up()
+    except RuntimeError as e:
+        raise SystemExit(str(e))
 
     print()
     print("READY — registered as:")

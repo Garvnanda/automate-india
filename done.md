@@ -337,6 +337,61 @@ Status legend: [ ] pending  [x] done  [~] in progress/partial
       demo video — not recorded yet.
 - [ ] Demo video — not recorded yet.
 
+## Batch 5 — panel rebuilt for comprehension + one-command launch
+Triggered by a blunt and correct piece of user feedback: the instrument panel looked good but
+**taught the judge nothing**. Reviewed it live in a browser rather than from the markup, and the
+criticism held up — so it was rebuilt around the story instead of the aesthetic.
+
+- [x] **Diagnosis, from actually looking at the rendered page:** (1) no sentence anywhere said what
+      the project does; (2) **the 5-step signed plan — the entire concept — was not on screen at
+      all**; (3) jargon with no glossary (`VAL ROWS`, `CSRG-IAP`, `PLAN CEILING`); (4) the
+      oscilloscope was the largest element and carried the least information; (5) contrast was too
+      low to survive a projector or a compressed video; (6) guarded mode needed a second terminal.
+- [x] `panel/index.html` rebuilt end to end. **The signed plan is now the hero element**: the five
+      declared steps are listed literally and light up as they execute; a sixth card appears when
+      the agent reaches for `delete_rows`, red and dashed, labelled either "Refused — not one of the
+      5 signed steps" or "Executed anyway — nothing was checking" depending on the mode. The plan
+      panel header itself flips between "Declared plan — not enforced" (red) and "Signed plan —
+      enforced" (green), which is what makes the before/after legible without narration.
+- [x] World state in **plain language instead of gauges**: `60 / 100 rows` + "40 rows were
+      permanently deleted" with a red bar, vs "intact — every row still there". Registry entries
+      render as tagged rows, production tagged red.
+- [x] Plain-English event feed ("BLOCKED — `delete_rows` was never in the signed plan. The call
+      never left the agent process") with the **raw JSONL audit log kept one click away** under a
+      `<details>` so the technical claim is still verifiable.
+- [x] **Hold is now a full-width banner**, not a keyhole icon: live timer, plain explanation, and a
+      link (deliberately **not** a button — approval only ever happens on ArmorIQ's dashboard).
+      Step 5 shows the argument diff inline: `authorized stage: staging` / `requested stage:
+      production`. That diff is the clearest statement of violation 2 anywhere in the project.
+- [x] **Adapted to a real backend constraint rather than changing the backend:** the agent only
+      logs a step *after* it has a verdict — there is no `allowed`/"starting" event (confirmed by
+      grepping every `log_event` call). So the panel infers the in-flight step as "the one after the
+      last finished one". No new log events invented to make the UI prettier.
+- [x] **One-command launch (the whole reason a judge can now run this).** `agent/infra.py`'s
+      bring-up extracted into `bring_up(log=...)`; `main()` is now a thin CLI wrapper over it, CLI
+      behaviour unchanged. `panel/server.py` calls it in a background thread on startup, exposes
+      `infra: {state, message}` through `/api/state`, and the page polls it — guarded mode stays
+      locked until it reports ready. Teardown on Ctrl-C removes `.session.json` and kills the
+      children. `--no-infra` opts out; an externally-run `agent.infra` is detected and reused.
+- [x] **Real bug found and fixed while testing that:** a stale `.session.json` (left by a crashed or
+      killed `agent.infra`) made the panel report "ready" and then fail every guarded run. First fix
+      attempt was wrong and *caught by testing it*: probing the tunnel treated any HTTP response as
+      alive, but a dead cloudflared quick tunnel still resolves — Cloudflare's edge answers **530**
+      for the hostname. Verified that 530 live against the stale URL, then changed the check to
+      treat `>= 500` as dead. Stale sessions are now deleted and replaced automatically.
+- [x] **Verified live in a browser, not from the markup:**
+      - unguarded violation 1 → `60 / 100 rows`, "40 rows were permanently deleted", intruder card
+        reads "Executed anyway — nothing was checking"
+      - guarded violation 1 → `100 / 100 rows` intact, `delete_rows` **BLOCKED**, through the real
+        `proxy.armoriq.ai` on a tunnel the panel brought up itself
+      - guarded violation 2 → hold banner live with running timer, step 5 showing the staging vs
+        production argument diff
+- [x] README rewritten around `python -m panel.server` as the single entry point.
+- [ ] Approved-state rendering (`held` → `approved` → `executed` in the new UI) — the verdicts are
+      the same ones proven live in Batch 3 and the handlers are wired, but the **new** panel's
+      approved rendering has not itself been watched through a real dashboard approval yet.
+- [ ] Demo video — still not recorded.
+
 ## Phase 8 — buffer (only if time allows)
 - [ ] token expiry mid-run demo
 - [ ] PAP pre-flight decisions

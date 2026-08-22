@@ -158,22 +158,36 @@ Walks the full sequence from `technical.md` §9: unguarded damage → reset → 
 guarded violation 1 (blocked) → guarded violation 2 (held — approve it live when prompted).
 Guarded steps still need `agent.infra` running in another terminal first.
 
-### The panel
-
-A real instrument panel — dual seismograph traces, needle gauges, brass toggle switches — driven
-entirely by live data: every trace pulse is a real line `agent.main` printed, every gauge reading
-comes from the actual SQLite state, and the held-action key is a status indicator, not a button —
-real approval only ever happens on ArmorIQ's own dashboard, same as the CLI.
+### The panel — start here if you only run one thing
 
 ```bash
 python -m panel.server
 ```
 
-Open `http://127.0.0.1:8080`. Flip **GUARDED** on or off, pick a scenario (HAPPY / VIOL-1 /
-VIOL-2), it runs for real. Only one lane animates per run — unguarded and guarded share the same
-database, so they can't honestly run simultaneously; the idle lane just shows its last result,
-dimmed, until you run that mode again. **RESET** re-seeds before every scenario run automatically,
-so consecutive runs are always comparable.
+That is the whole demo, one command. The panel brings the enforcement session up itself
+(cloudflared tunnel + ArmorIQ registration, the same work `agent.infra` does) in the background
+and shows its progress in the top-right corner; guarded mode unlocks once it says ready. Open
+`http://127.0.0.1:8080`.
+
+The page is built around **the signed plan**. The five declared steps are listed down the left and
+light up as the agent executes them. Turn ArmorIQ **off** and the header says so — nothing is
+checking the list — and a sixth card appears in red when the agent deletes eval rows anyway. Turn
+it **on** and the same run stops: `delete_rows` is refused because it isn't one of the five, and
+`promote_model(stage="production")` is held with the authorized and requested arguments shown side
+by side. On the right, the actual database state in plain language (`60 / 100 rows — 40 rows were
+permanently deleted`) and a plain-English feed of what the agent is doing. The raw JSONL audit log
+is one click away under the feed.
+
+When a run is held, a banner takes over the top of the page with a live timer and a link to
+ArmorIQ. It is a **link, not a button** — real approval only ever happens on ArmorIQ's own
+dashboard by a human with the right role. The panel just watches the `held` → `approved` →
+`executed` verdicts arrive.
+
+Every scenario re-seeds the database first, so consecutive runs are always comparable.
+
+If you already have `python -m agent.infra` running in another terminal, the panel detects it and
+uses that session instead of starting a second one. `python -m panel.server --no-infra` skips the
+bring-up entirely.
 
 ## Repo layout
 
