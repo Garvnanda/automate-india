@@ -283,7 +283,7 @@ def main():
     if "--no-infra" not in sys.argv:
         start_infra()
 
-    server = ThreadingHTTPServer((os.environ.get("HOST", "127.0.0.1"), PORT), Handler)
+    server = ThreadingHTTPServer((os.environ.get("HOST", "0.0.0.0"), PORT), Handler)
     print(f"panel at http://127.0.0.1:{PORT}")
     print("bringing up the enforcement session in the background — the page shows progress")
     try:
