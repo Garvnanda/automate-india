@@ -7,3 +7,6 @@ logs/*.jsonl
 .tools/
 armoriq.yaml
 .session.json
+
+# screen recordings — keep them locally, they are far too large for git
+*.mp4
