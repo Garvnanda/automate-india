@@ -109,7 +109,7 @@ body{
   background:linear-gradient(180deg,#0a0908,#060505);
   box-shadow:inset 0 0 0 1px #000, inset 0 3px 14px rgba(0,0,0,.95), inset 0 0 60px rgba(0,0,0,.6), 0 1px 0 rgba(255,235,205,.06);
 }
-.tracerow{display:flex; align-items:stretch; gap:clamp(8px,1.1vw,14px);}
+.tracerow{position:relative; display:flex; align-items:stretch; gap:clamp(8px,1.1vw,14px);}
 .logcol{flex:1; min-width:0; display:flex; flex-direction:column;}
 .logcol .console, .logcol .proof, .logcol .ask{flex:1; min-height:0; height:auto; max-height:none; margin:0;}
 .logcol .proof.on{display:flex; flex-direction:column;}
@@ -125,35 +125,74 @@ body{
 .logtab.active{color:var(--brass); border-color:rgba(201,162,39,.4); background:linear-gradient(180deg,#241d13,#15100a);}
 .logtab:disabled{opacity:.4; cursor:not-allowed;}
 
-.ask{display:none; flex-direction:column; gap:0;}
-.ask.show{display:flex;}
+/* ── floating chat — pops up over the scope/log area, not a tab ───── */
+.ask-float{
+  position:absolute; inset:0; z-index:70; display:none; flex-direction:column;
+  border-radius:9px; overflow:hidden;
+  background:linear-gradient(178deg,#1d1712,#0d0b09 60%);
+  box-shadow:0 0 0 1px rgba(201,162,39,.35), 0 22px 50px -14px #000, inset 0 1px 0 rgba(255,235,205,.06);
+  opacity:0; transform:translateY(6px) scale(.98); transition:opacity .16s ease, transform .16s ease;
+}
+.ask-float.open{display:flex;}
+.ask-float.show{opacity:1; transform:none;}
+.ask-hdr{
+  flex:none; display:flex; align-items:center; justify-content:space-between;
+  padding:9px 12px; border-bottom:1px solid rgba(0,0,0,.55);
+  font-family:var(--mono); font-size:9.5px; letter-spacing:.18em; color:var(--brass);
+  background:linear-gradient(180deg,#241d15,#181310);
+}
+.ask-x{background:none; border:0; color:#7c7263; font-size:17px; line-height:1; cursor:pointer; padding:0 2px;}
+.ask-x:hover{color:var(--ink);}
 .ask-log{
-  flex:1; min-height:0; overflow-y:auto; padding:8px 10px;
-  background:#08070650; border:1px solid rgba(0,0,0,.4); border-radius:7px 7px 0 0; border-bottom:0;
-  font-family:var(--cond); font-size:12px; line-height:1.5;
+  flex:1; min-height:0; overflow-y:auto; padding:12px 13px; display:flex; flex-direction:column; gap:9px;
+  font-family:var(--cond); font-size:13px; line-height:1.5;
 }
-.ask-empty{color:#544b41; font-style:italic; font-size:11.5px;}
-.ask-q, .ask-a{margin-bottom:9px;}
-.ask-q .who{font-family:var(--mono); font-size:8px; letter-spacing:.12em; color:var(--brass);}
-.ask-a .who{font-family:var(--mono); font-size:8px; letter-spacing:.12em; color:var(--green);}
-.ask-q .txt{color:var(--ink);}
-.ask-a .txt{color:#c9c0ac;}
-.ask-err .who{color:var(--red);}
-.ask-form{display:flex; gap:6px; flex:none;}
+.ask-empty{color:#8a7c53; font-style:italic; font-size:12px; max-width:80%;}
+.ask-chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;}
+.ask-chip{
+  font-family:var(--cond); font-size:11.5px; color:#c9bd9e; text-align:left;
+  background:linear-gradient(178deg,#241f18,#151210); border:1px solid rgba(201,162,39,.22);
+  border-radius:14px; padding:6px 12px; cursor:pointer; transition:border-color .15s, color .15s;
+}
+.ask-chip:hover{border-color:rgba(201,162,39,.55); color:var(--ink);}
+.ask-chip:disabled{opacity:.4; cursor:not-allowed;}
+
+/* user messages LEFT, agent messages RIGHT — explicit request, reverse of the usual convention */
+.ask-msg{max-width:78%; padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.48;}
+.ask-q{align-self:flex-start; background:linear-gradient(178deg,#221c14,#161210); border:1px solid rgba(201,162,39,.18); border-bottom-left-radius:3px; color:var(--ink);}
+.ask-a{align-self:flex-end; background:linear-gradient(178deg,#12201a,#0c1512); border:1px solid rgba(90,196,118,.22); border-bottom-right-radius:3px; color:#cfe8d8;}
+.ask-a.err{border-color:rgba(226,65,44,.4); color:#f4bdb8;}
+.ask-a .cursor{display:inline-block; width:6px; height:12px; margin-left:1px; background:var(--green); vertical-align:middle; animation:blink 1s steps(1,end) infinite;}
+
+.ask-form{display:flex; gap:0; flex:none; border-top:1px solid rgba(0,0,0,.55);}
 .ask-form input{
-  flex:1; min-width:0; background:#08070650; border:1px solid rgba(0,0,0,.4); border-top:0;
-  border-radius:0 0 0 7px; color:var(--ink); font-family:var(--cond); font-size:12.5px;
-  padding:8px 10px; outline:none;
+  flex:1; min-width:0; background:transparent; border:0; color:var(--ink); font-family:var(--cond);
+  font-size:13px; padding:11px 13px; outline:none;
 }
-.ask-form input:focus{border-color:rgba(201,162,39,.4);}
 .ask-form input::placeholder{color:#544b41;}
 .ask-form input:disabled{opacity:.5;}
 .ask-form button{
   font-family:var(--mono); font-size:9px; letter-spacing:.13em; font-weight:700; color:#241a00;
-  padding:0 16px; border-radius:0 0 7px 0; cursor:pointer; border:1px solid #6b5410; border-top:0;
+  padding:0 18px; cursor:pointer; border:0; border-left:1px solid rgba(0,0,0,.4);
   background:linear-gradient(180deg,#e8c463,#a8811b);
 }
-.ask-form button:disabled{cursor:not-allowed; color:#5e5549; border-color:#100d0b; background:linear-gradient(180deg,#332c25,#1b1714);}
+.ask-form button:disabled{cursor:not-allowed; color:#5e5549; background:linear-gradient(180deg,#332c25,#1b1714);}
+
+/* the FAB — sits in the ctlrow's own gap, styled to look like it floats even
+   though it's a normal flex child (robust to layout changes, no coordinate math) */
+.ask-fab{
+  align-self:center; display:flex; align-items:center; gap:8px;
+  padding:9px 16px 9px 14px; border-radius:22px; cursor:pointer;
+  background:linear-gradient(178deg,#2c2419,#171310); border:1px solid rgba(201,162,39,.4);
+  box-shadow:0 6px 16px -4px rgba(0,0,0,.7), 0 0 0 1px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,235,205,.08);
+  transition:box-shadow .18s, border-color .18s, transform .12s;
+}
+.ask-fab:hover{border-color:rgba(201,162,39,.7); box-shadow:0 8px 20px -4px rgba(0,0,0,.8), 0 0 14px -2px rgba(201,162,39,.3);}
+.ask-fab:active{transform:translateY(1px);}
+.ask-fab.active{border-color:var(--brass); box-shadow:0 0 16px -2px rgba(201,162,39,.5);}
+.ask-fab .bubble{color:var(--brass); font-size:9px; letter-spacing:.12em; animation:fabPulse 1.8s ease-in-out infinite;}
+@keyframes fabPulse{0%,100%{opacity:.4;} 50%{opacity:1;}}
+.ask-fab .cap{font-family:var(--mono); font-size:8px; letter-spacing:.1em; line-height:1.35; color:#c9bd9e; text-align:left;}
 .scope canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
 .glass{
   position:absolute; inset:0; pointer-events:none;
@@ -567,7 +606,7 @@ body{
     <div class="ob-body">
 
       <div class="ob-slide active" data-slide="0">
-        <div class="ob-kicker">PROMOTIONGUARD &middot; WALKTHROUGH 1/5</div>
+        <div class="ob-kicker">PROMOTIONGUARD &middot; WALKTHROUGH 1/6</div>
         <div class="ob-title">An agent, running an ML pipeline, unattended</div>
         <p>Somewhere in every ML team's backlog is the same job: pull the eval split, run the
         candidate model, check the numbers, promote the winner. Repetitive, well-specified,
@@ -591,7 +630,7 @@ body{
       </div>
 
       <div class="ob-slide" data-slide="1">
-        <div class="ob-kicker">WALKTHROUGH 2/5</div>
+        <div class="ob-kicker">WALKTHROUGH 2/6</div>
         <div class="ob-title">Two things go wrong &mdash; on purpose</div>
         <p>When a candidate model misses the bar, an agent reaches for one of two moves:</p>
         <div class="ob-rows">
@@ -613,7 +652,7 @@ body{
       </div>
 
       <div class="ob-slide" data-slide="2">
-        <div class="ob-kicker">WALKTHROUGH 3/5</div>
+        <div class="ob-kicker">WALKTHROUGH 3/6</div>
         <div class="ob-title">Two gates, not one filter</div>
         <div class="ob-rows">
           <div class="ob-row" style="--c:var(--red)"><i></i><div>
@@ -634,7 +673,7 @@ body{
       </div>
 
       <div class="ob-slide" data-slide="3">
-        <div class="ob-kicker">WALKTHROUGH 4/5</div>
+        <div class="ob-kicker">WALKTHROUGH 4/6</div>
         <div class="ob-title">What you're about to control</div>
         <div class="ob-rows">
           <div class="ob-row" style="--c:var(--green)"><i></i><div>
@@ -659,7 +698,28 @@ body{
       </div>
 
       <div class="ob-slide" data-slide="4">
-        <div class="ob-kicker">WALKTHROUGH 5/5</div>
+        <div class="ob-kicker">WALKTHROUGH 5/6</div>
+        <div class="ob-title">Ask the agent, anything</div>
+        <p>A round floating button sits in the controls, always reachable: <b>ASK THE AGENT</b>.
+        Open it and type &mdash; about PromotionGuard itself, or about the run you just watched.
+        The answer streams back word by word, in real time, from the same model that runs the
+        pipeline.</p>
+        <div class="ob-rows">
+          <div class="ob-row" style="--c:var(--brass)"><i></i><div>
+            <div class="h">GROUNDED, NOT GUESSED</div>
+            <div class="d">Every answer is built from the project itself and the real log of your
+            most recent run &mdash; never invented, never scripted.</div>
+          </div></div>
+          <div class="ob-row" style="--c:var(--green)"><i></i><div>
+            <div class="h">TRY THE SUGGESTED QUESTIONS</div>
+            <div class="d">Click one to send it instantly, or type your own. Ask why it picked the
+            stage it did, or what a keyword filter would have missed.</div>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="ob-slide" data-slide="5">
+        <div class="ob-kicker">WALKTHROUGH 6/6</div>
         <div class="ob-title">Everything here is real</div>
         <p>No scripted choreography, no placeholder data. Every trace pulse is a line the agent
         actually printed. Every gauge reading is live SQLite. Every hold is a genuine ArmorIQ
@@ -706,21 +766,25 @@ body{
       <div class="logtabs">
         <button class="logtab active" id="tabLog" data-tip="tablog">LOG</button>
         <button class="logtab" id="tabProof" data-tip="tabproof">PROOF</button>
-        <button class="logtab" id="tabAsk" data-tip="tabask" disabled>ASK THE AGENT</button>
       </div>
       <div class="console" id="console" data-tip="console"></div>
       <div class="proof" id="proof"></div>
-      <div class="ask" id="askPanel">
-        <div class="ask-log" id="askLog">
-          <div class="ask-empty" id="askEmpty">Run something first — the agent can only answer for a
-            real run it actually did.</div>
-        </div>
-        <form class="ask-form" id="askForm">
-          <input id="askInput" maxlength="500" autocomplete="off"
-                 placeholder="Ask about the run that just happened…" disabled>
-          <button type="submit" id="askSubmit" disabled>ASK</button>
-        </form>
+    </div>
+
+    <div class="ask-float" id="askFloat">
+      <div class="ask-hdr">
+        <span>ASK THE AGENT</span>
+        <button class="ask-x" id="askClose" aria-label="minimize" type="button">&times;</button>
       </div>
+      <div class="ask-log" id="askLog">
+        <div class="ask-empty" id="askEmpty">Ask about PromotionGuard itself, or about the run that
+          just happened. Real answers only — never scripted, never guessed.</div>
+        <div class="ask-chips" id="askChips"></div>
+      </div>
+      <form class="ask-form" id="askForm">
+        <input id="askInput" maxlength="500" autocomplete="off" placeholder="Ask anything about PromotionGuard…">
+        <button type="submit" id="askSubmit">ASK</button>
+      </form>
     </div>
   </div>
 
@@ -779,6 +843,9 @@ body{
         <textarea id="cardText" maxlength="4000"
           placeholder="What should the agent read as the dataset's documentation? Try convincing it to do something the switches didn't authorize."></textarea>
       </div>
+      <button class="ask-fab" id="askFab" data-tip="askfab" type="button">
+        <span class="bubble">&#9679;&#9679;&#9679;</span><span class="cap">ASK THE<br>AGENT</span>
+      </button>
       <div class="rgt">
         <button class="knob" id="preset" data-tip="preset">
           <span class="dial"></span><span class="cap">PRESET</span><span class="val">BASELINE</span>
@@ -823,7 +890,7 @@ body{
 
     // which console lamp echoes each slide's theme — a callback to the real
     // annunciators, not decoration for its own sake
-    const SLIDE_LAMPS = [[], ['block'], ['block', 'hold'], ['armed'], ['armed', 'hold', 'block']];
+    const SLIDE_LAMPS = [[], ['block'], ['block', 'hold'], ['armed'], ['armed'], ['armed', 'hold', 'block']];
     function go(idx){
       i = Math.max(0, Math.min(slides.length - 1, idx));
       slides.forEach((s, k) => s.classList.toggle('active', k === i));
@@ -1353,65 +1420,120 @@ body{
     delete_rows: `Destructive. Deletes rows from the evaluation set the model is graded on.`,
   };
 
-  /* ───────── ASK THE AGENT — free-text Q&A over a real run's log ─────────
-     Three views share one slot: LOG (live, during/after a run), PROOF
-     (settled verdict chain), ASK (a real chat grounded in the run's own
-     transcript — agent/ask.py, never scripted). Exactly one is visible. */
-  let lastRunId = null, activeTab = 'log', proofReady = false, asking = false;
-
+  /* ───────── LOG / PROOF — two views share one slot ───────── */
+  let activeTab = 'log', proofReady = false;
   function setTab(tab){
     activeTab = tab;
     el.console.style.display = tab === 'log' ? '' : 'none';
     $('proof').classList.toggle('on', tab === 'proof' && proofReady);
-    $('askPanel').classList.toggle('show', tab === 'ask');
     $('tabLog').classList.toggle('active', tab === 'log');
     $('tabProof').classList.toggle('active', tab === 'proof');
-    $('tabAsk').classList.toggle('active', tab === 'ask');
-    if (tab === 'ask') $('askInput').focus();
   }
   $('tabLog').addEventListener('click', () => setTab('log'));
   $('tabProof').addEventListener('click', () => { if (proofReady) setTab('proof'); });
-  $('tabAsk').addEventListener('click', () => { if (lastRunId) setTab('ask'); });
 
-  function askLine(cls, who, text){
+  /* ───────── ASK THE AGENT — a real, streamed, floating chat ─────────
+     Grounded in agent/ask.py: the project itself (always) plus the most
+     recent real run's transcript (once one exists). Genuine token streaming
+     from OpenRouter via SSE — the words arrive incrementally because they
+     were generated incrementally, not because a timer is faking it. */
+  let lastRunId = null, asking = false, chatStarted = false;
+
+  const SUGGESTED = [
+    { q: "What is PromotionGuard?" },
+    { q: "Why can't a keyword filter catch either violation?" },
+    { q: "What are the two ArmorIQ enforcement gates?" },
+    { q: "What happens if I authorize deleting rows?" },
+    { q: "Why did you promote to that stage?", needsRun: true },
+  ];
+  function paintChips(){
+    const box = $('askChips');
+    box.innerHTML = '';
+    for (const s of SUGGESTED){
+      if (s.needsRun && !lastRunId) continue;
+      const b = document.createElement('button');
+      b.className = 'ask-chip'; b.type = 'button'; b.textContent = s.q;
+      b.addEventListener('click', () => sendAsk(s.q));
+      box.appendChild(b);
+    }
+  }
+  paintChips();
+
+  function openAsk(){
+    $('askFloat').classList.add('open');
+    $('askFab').classList.add('active');
+    requestAnimationFrame(() => $('askFloat').classList.add('show'));
+    $('askInput').focus();
+  }
+  function closeAsk(){
+    $('askFloat').classList.remove('show');
+    $('askFab').classList.remove('active');
+    setTimeout(() => { if (!$('askFloat').classList.contains('show')) $('askFloat').classList.remove('open'); }, 180);
+  }
+  $('askFab').addEventListener('click', () => {
+    $('askFloat').classList.contains('open') && $('askFloat').classList.contains('show') ? closeAsk() : openAsk();
+  });
+  $('askClose').addEventListener('click', closeAsk);
+  document.addEventListener('click', e => {
+    const f = $('askFloat');
+    if (!f.classList.contains('show')) return;
+    if (f.contains(e.target) || $('askFab').contains(e.target)) return;
+    closeAsk();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAsk(); });
+
+  function addBubble(cls, text){
+    if (!chatStarted){ chatStarted = true; const em = $('askEmpty'); if (em) em.remove(); }
     const d = document.createElement('div');
-    d.className = 'ask-' + cls;
-    const w = document.createElement('div'); w.className = 'who'; w.textContent = who;
-    const t = document.createElement('div'); t.className = 'txt'; t.textContent = text;
-    d.appendChild(w); d.appendChild(t);
+    d.className = 'ask-msg ' + cls;
+    d.textContent = text;
     $('askLog').appendChild(d);
     $('askLog').scrollTop = $('askLog').scrollHeight;
+    return d;
   }
 
-  $('askForm').addEventListener('submit', async e => {
-    e.preventDefault();
-    if (asking || !lastRunId) return;
-    const q = $('askInput').value.trim();
+  function sendAsk(qOverride){
+    if (asking) return;
+    const q = (qOverride ?? $('askInput').value).trim();
     if (!q) return;
     asking = true;
     $('askInput').value = ''; $('askInput').disabled = true; $('askSubmit').disabled = true;
-    askLine('q', 'YOU', q);
-    askLine('a', 'AGENT', '…thinking…');
-    const pending = $('askLog').lastElementChild;
-    try {
-      const r = await fetch('/api/ask', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ run_id: lastRunId, question: q }),
-      });
-      const body = await r.json();
-      if (r.ok) {
-        pending.querySelector('.txt').textContent = body.answer;
-      } else {
-        pending.className = 'ask-err'; pending.querySelector('.who').textContent = 'ERROR';
-        pending.querySelector('.txt').textContent = body.error || ('HTTP ' + r.status);
+    addBubble('ask-q', q);
+    const bubble = addBubble('ask-a', '');
+    const cursor = document.createElement('span'); cursor.className = 'cursor';
+    bubble.appendChild(cursor);
+
+    const params = new URLSearchParams({ question: q });
+    if (lastRunId) params.set('run_id', lastRunId);
+    const src = new EventSource('/api/ask?' + params.toString());
+    let text = '';
+    src.onmessage = e => {
+      if (e.data === '__END__'){ src.close(); finish(); return; }
+      let o; try { o = JSON.parse(e.data); } catch (err) { return; }
+      if (o.error){
+        bubble.className = 'ask-msg ask-a err';
+        bubble.textContent = o.error;
+        src.close(); finish(); return;
       }
-    } catch (err) {
-      pending.className = 'ask-err'; pending.querySelector('.who').textContent = 'ERROR';
-      pending.querySelector('.txt').textContent = 'lost the connection to the panel server';
+      if (o.delta){
+        text += o.delta;
+        bubble.textContent = text;
+        bubble.appendChild(cursor);
+        $('askLog').scrollTop = $('askLog').scrollHeight;
+      }
+    };
+    src.onerror = () => {
+      src.close();
+      if (!text) { bubble.className = 'ask-msg ask-a err'; bubble.textContent = 'lost the connection to the panel server'; }
+      finish();
+    };
+    function finish(){
+      cursor.remove();
+      asking = false;
+      $('askInput').disabled = false; $('askSubmit').disabled = false; $('askInput').focus();
     }
-    asking = false;
-    $('askInput').disabled = false; $('askSubmit').disabled = false; $('askInput').focus();
-  });
+  }
+  $('askForm').addEventListener('submit', e => { e.preventDefault(); sendAsk(); });
 
   const TIPS = {
     mark: `<b>WHAT THIS IS</b>An AI agent runs an ML model promotion pipeline unattended. You set what
@@ -1535,12 +1657,12 @@ body{
       <code>agent.main</code> printed it. Nothing here is generated by the page.`,
     tablog: `<b>LOG</b>The live verdict stream for the current or most recent run.`,
     tabproof: `<b>PROOF</b>The settled verdict chain against the signed plan's hash, once a run ends.`,
-    tabask: () => lastRunId
-      ? `<b>ASK THE AGENT</b>A real question, answered by the same LLM, grounded only in the actual
-         log of the run you just watched — not scripted, not guessed. Ask why it did what it did, or
-         what it would have needed to do something else.`
-      : `<b>ASK THE AGENT</b>Locked until you run something — the agent can only answer for a run it
-         actually did.`,
+    askfab: () => lastRunId
+      ? `<b>ASK THE AGENT</b>A real, streamed conversation — ask about PromotionGuard itself, or
+         about the run you just watched. Grounded only in the real project and the real log, never
+         scripted, never guessed.`
+      : `<b>ASK THE AGENT</b>Ask about PromotionGuard right now, or run something first and ask about
+         that too — either works.`,
   };
   const tipEl = $('tip');
   let tipFor = null;
@@ -1667,8 +1789,7 @@ body{
     if (typeof raw === 'string'){
       if (raw.startsWith('run_id=')) {
         lastRunId = raw.slice(7).trim().split(/\s+/)[0];
-        $('tabAsk').disabled = false; $('askInput').disabled = false; $('askSubmit').disabled = false;
-        if ($('askEmpty')) { $('askEmpty').remove(); }
+        paintChips();
         say('RUNNING'); return;
       }
       if (raw.startsWith('BLOCKED:')) { say(raw); log(raw, 'err'); return; }

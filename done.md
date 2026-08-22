@@ -694,3 +694,57 @@ free-text Q&A with the agent about the run it just did.
       after the run finished ("why staging, not production") — answer correctly said the transcript
       doesn't contain a *reason*, only that the call specified staging, rather than inventing a
       justification. Both turns stayed in one running conversation in the ASK tab.
+
+## Batch 11 — Ask the Agent rebuilt: floating chat, real streaming, project-wide scope
+User feedback: the tab-based Ask the Agent from Batch 10 was "almost not visible to a normal
+user." Full rebuild per explicit spec — floating button, floating chat overlaying the console,
+minimize on second click or click-outside, project-wide scope with suggested questions, real
+word-by-word streaming, left/right chat bubbles, and an onboarding slide for it.
+
+- [x] **Real token streaming, not a client-side typewriter.** `agent/ask.py`'s `ask_stream()`
+      sends `"stream": true` to OpenRouter and parses its SSE response directly (`data: {...}`
+      chunks terminated by `data: [DONE]`), yielding each `delta.content` piece as it actually
+      arrives. `panel/server.py`'s `/api/ask` converted from a POST+JSON endpoint to a GET
+      SSE stream (same pattern as `/api/run`), relaying each delta to the browser the moment
+      OpenRouter sends it. The browser's `EventSource` appends each delta to the answer bubble
+      live — the words appear incrementally because they were generated incrementally.
+      **Debugged a real transient failure caught live**: a raw request to the streaming API
+      showed this reasoning model (`nemotron-3-ultra`) streams its `delta.reasoning` field first,
+      with `delta.content` empty, before eventually populating real content — occasionally the
+      whole response stayed reasoning-only (free-tier flakiness, already documented elsewhere in
+      this project). Confirmed the code itself was correct by re-running the identical call
+      immediately after and getting a full, accurate streamed answer both times.
+- [x] **Scope widened from "one run's log" to "the project itself."** `agent/ask.py` gained a
+      `PROJECT_BRIEF` — a curated, user-facing description of what PromotionGuard is, the two
+      violations, the two enforcement gates, and what each control does — written from what a
+      judge should be told, deliberately excluding file paths, source code, infrastructure, and
+      the security findings from development. `run_id` is now optional: no run yet → answers from
+      the project brief alone; a run exists → both are given to the model. An invalid/stale
+      `run_id` degrades gracefully to a project-only answer rather than erroring the whole
+      request — verified this doesn't reopen the path-traversal question by testing
+      `transcript_for()` directly, which still rejects a traversal attempt before touching the
+      filesystem regardless of how the caller handles that rejection.
+- [x] **Floating button + floating chat, not a tab.** `.ask-fab` sits as a real flex child in the
+      CONDITIONS row's own gap — the empty space between the dial cluster and RUN/RESET — so it's
+      always in the right place with no coordinate math, and doubles as filling that space with
+      something functional. `.ask-float` is an absolutely-positioned overlay inside `.tracerow`,
+      so opening it visually covers the scope/log area exactly as asked. Three ways to
+      close, all verified live: click the FAB again, click the explicit &times;, click anywhere
+      outside the chat (a document-level listener that ignores clicks inside the chat or the FAB
+      itself). Conversation history survives close/reopen.
+- [x] **Chat bubbles: user LEFT, agent RIGHT** — the reverse of the usual convention, exactly as
+      specified. `.ask-q{align-self:flex-start}` / `.ask-a{align-self:flex-end}` in a column-flex
+      log. A blinking cursor span follows the streaming text and is removed on completion or error.
+- [x] **Suggested questions that send on click.** Five chips (`SUGGESTED` array): four always
+      shown, one ("Why did you promote to that stage?") gated behind `lastRunId` so it only
+      appears once a real run exists to ground it — verified live, hidden before any run, visible
+      and answerable after one.
+- [x] **Onboarding slide 5 of 6**, same pattern as every other slide (kicker, title, paragraph,
+      two `.ob-rows` cards, ARMED lamp lit). Inserted before the closer rather than after, since it
+      primes a visitor to actually use the button the moment they land on the console. All five
+      prior slides renumbered X/5 → X/6, `SLIDE_LAMPS` extended to 6 entries, the closer's own
+      `data-slide` bumped to 5 and its kicker to 6/6. Verified live: correct kicker text, correct
+      lamp state, correct dot count, and `ENTER CONSOLE` still lands on the working console.
+- [x] Removed the Batch 10 tab-based integration entirely rather than leaving two Ask UIs —
+      `#tabAsk`/`#askPanel` and their JS deleted, `LOG`/`PROOF` simplified back to a clean 2-tab
+      strip.

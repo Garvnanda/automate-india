@@ -5,7 +5,7 @@ Serves panel/index.html and four endpoints the page calls:
   GET  /api/state            current DB state (val row count, promotions)
   POST /api/reset            runs data/reset.py, returns new state
   GET  /api/run?mode=...     runs agent.main, streams its stdout as SSE
-  POST /api/ask              free-text Q&A grounded in one real run's log (agent/ask.py)
+  GET  /api/ask?question=... streams the agent's answer token by token, SSE (agent/ask.py)
 
 The panel never fakes anything: every trace pulse, lamp, and gauge move is
 driven by a real line agent.main printed, in real time. Guarded runs need
@@ -175,6 +175,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "cross-origin request refused"}, status=403)
             return self._run(parse_qs(parsed.query))
 
+        if parsed.path == "/api/ask":
+            if not same_origin(self):
+                return self._json({"error": "cross-origin request refused"}, status=403)
+            return self._ask(parse_qs(parsed.query))
+
         self.send_response(404)
         self.end_headers()
 
@@ -189,24 +194,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, status=400)
             n = seed_for(cfg)
             return self._json({"seeded": n, **current_state()})
-
-        if parsed.path == "/api/ask":
-            if not same_origin(self):
-                return self._json({"error": "cross-origin request refused"}, status=403)
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-                payload = json.loads(self.rfile.read(length) or b"{}")
-            except (ValueError, json.JSONDecodeError):
-                return self._json({"error": "malformed request body"}, status=400)
-            try:
-                answer = ask_mod.ask(payload.get("run_id"), payload.get("question"))
-            except ValueError as e:
-                return self._json({"error": str(e)}, status=400)
-            except FileNotFoundError as e:
-                return self._json({"error": str(e)}, status=404)
-            except RuntimeError as e:
-                return self._json({"error": str(e)}, status=502)
-            return self._json({"answer": answer})
 
         self.send_response(404)
         self.end_headers()
@@ -267,6 +254,25 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self._sse(json.dumps({"__final_state__": current_state(), "exit_code": proc.returncode}))
+        self._sse("__END__")
+
+    def _ask(self, query):
+        run_id = (query.get("run_id") or [None])[0]
+        question = (query.get("question") or [""])[0]
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+        try:
+            for delta in ask_mod.ask_stream(run_id, question):
+                self._sse(json.dumps({"delta": delta}))
+        except (ValueError, FileNotFoundError, RuntimeError) as e:
+            self._sse(json.dumps({"error": str(e)}))
+        except (BrokenPipeError, ConnectionResetError):
+            return
         self._sse("__END__")
 
 
