@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PromotionGuard Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -592,6 +593,32 @@ body{
 
 @media (prefers-reduced-motion: reduce){
   *{transition-duration:.01ms !important; animation-duration:.01ms !important; animation-iteration-count:1 !important;}
+}
+
+/* ── responsive additions below — desktop (>1180px) untouched ───────── */
+
+/* small laptops / narrow desktop windows: safety net so button rows wrap
+   instead of getting clipped by .panel's overflow:hidden */
+@media (max-width:1180px){
+  .switches{flex-wrap:wrap; row-gap:10px;}
+  .ctlrow{align-items:flex-start;}
+}
+
+/* tablets / narrow laptop windows: stack the scope+log row and the plan
+   strip so nothing gets squeezed into unreadable slivers */
+@media (max-width:820px){
+  .tracerow{flex-direction:column;}
+  .logcol{height:clamp(160px,30vh,240px);}
+  .planbar{flex-direction:column;}
+  .planlabel{border-right:0; box-shadow:none; border-bottom:1px solid rgba(0,0,0,.55); padding:0 0 8px 4px;}
+  .psteps{grid-template-columns:repeat(3,1fr) !important;}
+}
+
+/* phones */
+@media (max-width:480px){
+  .psteps{grid-template-columns:repeat(2,1fr) !important;}
+  .rgt{width:100%; justify-content:space-between;}
+  .plate{text-align:left;}
 }
 </style>
 </head>
