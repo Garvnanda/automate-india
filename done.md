@@ -748,3 +748,69 @@ word-by-word streaming, left/right chat bubbles, and an onboarding slide for it.
 - [x] Removed the Batch 10 tab-based integration entirely rather than leaving two Ask UIs —
       `#tabAsk`/`#askPanel` and their JS deleted, `LOG`/`PROOF` simplified back to a clean 2-tab
       strip.
+
+## Batch 12 — Ask the Agent: repositioned button, mobile-shaped chat, bubble sides flipped
+User feedback on Batch 11's floating chat: too wide (spanned the whole console), button centered
+where it shouldn't be. Three targeted fixes, everything else from Batch 11 left untouched.
+
+- [x] **FAB moved out of the CONDITIONS-row gap**, now stacked directly above the
+      `MODEL cand-v7-... · PLAN NOT SIGNED / READY — N STEPS TO SIGN` plate text, left-aligned to
+      it — a new `.rgt-status` flex column (`align-items:flex-start`) holds the button and the
+      plate together, sitting after RUN/RESET as before.
+- [x] **Floating chat reshaped from a console-wide banner to a compact, phone-proportioned panel**
+      (`clamp(300px,29vw,352px)` wide, `clamp(400px,54vh,500px)` tall) that pops up anchored to the
+      button's own corner (`right`/`bottom` positioned, `transform-origin:bottom right`) rather than
+      stretching `inset:0` across the whole scope/log area. Moved from being a child of `.tracerow`
+      to a direct child of `.panel` so it has the full panel's coordinate space to anchor against —
+      the button and the chat now live in the same part of the panel, not two different flex rows.
+- [x] **Bubble sides flipped per correction**: user's own messages now right-aligned, the agent's
+      answers left-aligned (the user had asked for the opposite in Batch 11's original request, then
+      caught and corrected it themselves this turn). Corner radii swapped to match
+      (`.ask-q` tail now bottom-right, `.ask-a` tail now bottom-left).
+- [x] Verified live: FAB position, chat shape/anchor, real streamed answer landing in the
+      correctly-flipped left bubble, and click-outside-to-close still working from the panel's new
+      position. Everything else — suggested chips, run-grounding, onboarding slide, streaming
+      mechanics — untouched and re-confirmed working.
+
+## Batch 13 — Ask the Agent: button relocated again, streaming smoothed
+User feedback with a screenshot circling the exact target spot: still not the right place, and the
+stream "feels laggy" despite being real token streaming.
+
+- [x] **FAB relocated to the AUTHORIZE row's own trailing empty space** — the gap after the CLEAN
+      switch, at the row's right edge, exactly where the user circled it. Implementation: a
+      `display:contents` wrapper (`#bankADyn`, same trick already used for `#bankBDyn`) holds the
+      seven JS-built switches so their append order is unaffected by where the static FAB sits in
+      markup; the FAB itself uses `margin-left:auto` inside the `.switches` flex row to get pushed
+      to that trailing space rather than needing coordinates. `.rgt-status`'s wrapper (introduced
+      last batch to stack the FAB above the plate) is gone — `.plate` is back to sitting directly in
+      `.rgt` as before, since the FAB no longer lives there.
+- [x] **Diagnosed the actual cause of the lag, not just added a delay/animation to mask it.** The
+      old streaming handler did `bubble.textContent = text` (destroys and rebuilds the whole text
+      node) followed by re-appending the cursor element, **on every single SSE message** — a full
+      childList mutation per token, often many times within one frame, plus a synchronous
+      `scrollTop` read/write forcing layout on each one. That's real layout thrashing, not
+      perceived lag.
+      **Fix:** deltas now accumulate in a plain JS string; one `requestAnimationFrame` loop flushes
+      that buffer into a single stable `<span class="txt">` at most once per display frame,
+      completely decoupled from how bursty the network delivery is. The cursor is a sibling element
+      created once, never re-inserted. Scroll only happens on a flushed frame, and only when the
+      log was already scrolled near the bottom (so it doesn't fight a user who scrolled up to
+      reread something).
+      Verified live: mid-stream snapshots during an active response showed clean, complete text
+      with no truncation or visible rewrite artifacts, and the full answer arrived correctly both
+      times tested.
+
+## Batch 14 — Ask the Agent: bigger button, chat positioned from the button's real geometry
+Two small final polish items.
+
+- [x] FAB enlarged — bigger padding, border-radius, and type size, bolder caption weight. Noticeably
+      more prominent without changing its role or position.
+- [x] **Chat position now computed from the button's actual `getBoundingClientRect()` at open time**,
+      not another guessed CSS offset. The button has moved twice already as the layout evolved
+      (Batch 12 → Batch 13), and each time meant re-guessing a `bottom`/`right` clamp value that
+      immediately went stale. `positionAskFloat()` reads both the panel's and the button's real
+      rects and sets `right`/`bottom` so the chat's bottom edge sits a fixed 10px above the button
+      and its right edge lines up with the button's right edge — correct regardless of where the
+      button ends up living in a future revision, and it also re-runs on window resize while open.
+      Verified live with exact geometry, not just a screenshot: `gapAboveButton: 10px`,
+      `rightEdgeDiff: 0px`.
