@@ -280,6 +280,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    if not DATASET_DB_PATH.exists():
+        seed()
+
     if "--no-infra" not in sys.argv:
         start_infra()
 
