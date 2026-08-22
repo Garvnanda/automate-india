@@ -169,19 +169,25 @@ That is the whole demo, one command. The panel brings the enforcement session up
 and shows its progress in the top-right corner; guarded mode unlocks once it says ready. Open
 `http://127.0.0.1:8080`.
 
-The page is built around **the signed plan**. The five declared steps are listed down the left and
-light up as the agent executes them. Turn ArmorIQ **off** and the header says so — nothing is
-checking the list — and a sixth card appears in red when the agent deletes eval rows anyway. Turn
-it **on** and the same run stops: `delete_rows` is refused because it isn't one of the five, and
-`promote_model(stage="production")` is held with the authorized and requested arguments shown side
-by side. On the right, the actual database state in plain language (`60 / 100 rows — 40 rows were
-permanently deleted`) and a plain-English feed of what the agent is doing. The raw JSONL audit log
-is one click away under the feed.
+The page is the **PromotionGuard console**: an instrument panel with a dual-trace scope, needle
+gauges and brass switches, all driven by real data — every trace pulse is a line `agent.main`
+actually printed, every gauge reading comes from live SQLite.
 
-When a run is held, a banner takes over the top of the page with a live timer and a link to
-ArmorIQ. It is a **link, not a button** — real approval only ever happens on ArmorIQ's own
-dashboard by a human with the right role. The panel just watches the `held` → `approved` →
-`executed` verdicts arrive.
+Running across the middle is **the signed plan**: six recessed modules, one per declared step plus a
+reserved slot. Each lights as the agent gets a verdict for it — green for done, amber for held, red
+for blocked. The strip's label flips from `DECLARED PLAN / NOT ENFORCED` to `SIGNED PLAN / ENFORCED
+BY ARMORIQ` when you throw the GUARDED switch, and the reserved slot fills with `delete_rows` the
+moment the agent reaches for it: red and refused under enforcement, red and *executed* without it.
+
+**Every explanation is on hover.** Nothing on the panel is captioned with prose — point at any
+element (the title, a plan step, a gauge, the key dial, a lamp, a switch) and a floating card
+explains what it is and why it matters. The text reacts to live state: hovering `delete_rows` after
+a guarded run tells you the call never left the agent process; after an unguarded one it tells you
+forty rows are gone.
+
+When a run is held, the key dial arms and a timer runs. It is an **indicator, not a button** — real
+approval only ever happens on ArmorIQ's own dashboard, by a human with a higher-ranked role. The
+panel just watches the `held` → `approved` → `executed` verdicts arrive and turns the key.
 
 Every scenario re-seeds the database first, so consecutive runs are always comparable.
 

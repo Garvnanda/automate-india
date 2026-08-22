@@ -387,9 +387,40 @@ criticism held up — so it was rebuilt around the story instead of the aestheti
       - guarded violation 2 → hold banner live with running timer, step 5 showing the staging vs
         production argument diff
 - [x] README rewritten around `python -m panel.server` as the single entry point.
-- [ ] Approved-state rendering (`held` → `approved` → `executed` in the new UI) — the verdicts are
-      the same ones proven live in Batch 3 and the handlers are wired, but the **new** panel's
-      approved rendering has not itself been watched through a real dashboard approval yet.
+## Batch 5b — instrument aesthetic restored, explanations moved to hover
+User feedback on the Batch 5 rebuild: the *working, text and explanations were right*, but the flat
+card layout was the wrong look — the instrument console from the recording
+(`Screen Recording 2026-08-22 143843.mp4`) is the UI they want. So: keep every Batch 5 capability,
+put it back inside the instrument.
+
+- [x] Confirmed what the recording actually shows rather than assuming — pulled frames out of the
+      mp4 with ffmpeg and matched them against git history: the video is the panel exactly as it
+      stood at commit `d8e9b3b`. Restored that file as the base instead of re-deriving the look.
+- [x] **The signed plan lives in the instrument now**, as a row of six recessed modules between the
+      scope and the gauge bay, each with its own indicator lamp: five plan steps plus a reserved
+      sixth slot that stays empty until `delete_rows` shows up, so nothing moves when it appears.
+      Lamps use the panel's existing language — amber blink for in-flight, green for done, amber for
+      held, red for blocked. The strip's left label flips `DECLARED PLAN / NOT ENFORCED` (red) to
+      `SIGNED PLAN / ENFORCED BY ARMORIQ` (green) with the mode.
+- [x] **All prose moved into hover-only floating explainers.** One brass-edged tooltip that follows
+      the cursor, flips side near screen edges, and never occupies panel space. 20 explainers cover
+      the title, session lamp, scope, plan strip, each of the five steps, the intruder, both gauges,
+      the key dial, all three annunciator lamps, all four switches, reset and the console. Several
+      are functions, not strings, so the text reflects live state — the intruder explains "blocked,
+      the call never left the agent" vs "executed, forty rows are gone", and the GUARDED switch
+      explains why it is locked while the tunnel is still coming up.
+- [x] Hold timer added to the key dial (appears only while armed); session lamp added to the bezel
+      so the one-command bring-up is visible without leaving the instrument. The GUARDED switch
+      refuses to arm until the session is ready and says so on the status plate.
+- [x] JS syntax-checked with `node --check` before loading, then **the whole thing verified live in
+      the browser**: hover explainers render correctly; unguarded violation 1 lights all five steps
+      green, drops the gauge to 60 and fills the sixth slot red; guarded violation 2 shows steps 1-4
+      green, `promote_model` amber, HOLD lamp lit, key dial armed and counting.
+- [x] **Full hold cycle confirmed end to end in the restored UI** — held at 0:16, approved live from
+      the ArmorIQ dashboard by `garvnanda326@gmail.com`, and the panel rendered the key turning,
+      `APPROVED`, the guarded gauge holding at 100 rows and `PROD PROMOTIONS 1`, with the console
+      carrying `held → approved → executed`. This was the one path still unverified after Batch 5;
+      it is now closed.
 - [ ] Demo video — still not recorded.
 
 ## Phase 8 — buffer (only if time allows)
