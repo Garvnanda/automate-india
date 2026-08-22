@@ -17,6 +17,7 @@ Usage:  python -m panel.server        (serves http://127.0.0.1:8080)
 import json
 import subprocess
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -24,11 +25,68 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from agent import infra  # noqa: E402
 from agent.config import DATASET_DB_PATH, EVAL_SPLIT, REGISTRY_DB_PATH, SESSION_FILE  # noqa: E402
 from data.seed import seed  # noqa: E402
 
 PORT = 8080
 PY = sys.executable
+
+# Guarded runs need the MCP servers tunneled and registered. The panel brings
+# that up itself in a background thread so the whole demo is one command; the
+# page polls this and only unlocks guarded mode once it says "ready".
+INFRA = {"state": "off", "message": "enforcement session not started"}
+
+
+def session_alive():
+    """True only if .session.json points at a tunnel that still answers.
+
+    agent.infra deletes the file on a clean exit, but a crash or a killed
+    terminal leaves it behind pointing at a dead cloudflared URL — and a stale
+    file would otherwise make the panel report "ready" and then fail every
+    guarded run.
+
+    A dead quick tunnel still resolves: Cloudflare's edge answers for the
+    hostname and returns 5xx (530 "origin unreachable") because there is no
+    tunnel behind it. So a 5xx means dead, while a live FastMCP origin answers
+    HEAD with a 2xx/4xx of its own.
+    """
+    try:
+        servers = json.loads(SESSION_FILE.read_text(encoding="utf-8"))["servers"]
+        url = next(iter(servers.values()))["url"]
+    except Exception:  # noqa: BLE001 — unreadable file is a dead file
+        return False
+    import urllib.error
+    import urllib.request
+
+    try:
+        urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=6)
+        return True
+    except urllib.error.HTTPError as e:
+        return e.code < 500  # it answered for itself, not an edge error page
+    except Exception:  # noqa: BLE001 — connection refused / DNS gone / timeout
+        return False
+
+
+def start_infra():
+    if SESSION_FILE.exists():
+        if session_alive():
+            # somebody already ran `python -m agent.infra` — use theirs, don't
+            # register a second session on top of it
+            INFRA.update(state="ready", message="using the session already running", owned=False)
+            return
+        SESSION_FILE.unlink(missing_ok=True)
+
+    INFRA.update(state="starting", message="starting MCP servers...", owned=True)
+
+    def run():
+        try:
+            infra.bring_up(log=lambda m: INFRA.update(message=m.strip()))
+            INFRA.update(state="ready", message="tunneled and registered with ArmorIQ")
+        except Exception as e:  # noqa: BLE001 — surfaced to the page verbatim
+            INFRA.update(state="error", message=str(e))
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def current_state():
@@ -45,7 +103,7 @@ def current_state():
                 "SELECT model_hash, stage, promoted_at FROM promotions ORDER BY id"
             )
         ]
-    return {"val_rows": val_rows, "promotions": promotions}
+    return {"val_rows": val_rows, "promotions": promotions, "infra": dict(INFRA)}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -103,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
         if mode == "guarded" and not SESSION_FILE.exists():
-            self._sse("ERROR: no .session.json — run `python -m agent.infra` first")
+            self._sse(f"ERROR: enforcement session not ready — {INFRA['message']}")
             self._sse("__END__")
             return
 
@@ -134,13 +192,21 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    if "--no-infra" not in sys.argv:
+        start_infra()
+
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"panel at http://127.0.0.1:{PORT}")
-    print("guarded scenarios need `python -m agent.infra` running in another terminal")
+    print("bringing up the enforcement session in the background — the page shows progress")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        if INFRA.get("owned"):
+            print("\nshutting down the enforcement session...")
+            SESSION_FILE.unlink(missing_ok=True)
+            infra.shutdown()
 
 
 if __name__ == "__main__":
