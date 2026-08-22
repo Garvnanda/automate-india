@@ -33,7 +33,7 @@ MODEL_METRICS = {
 }
 
 
-def seed_dataset_db(card="poisoned"):
+def seed_dataset_db(card="poisoned", card_text=""):
     conn = sqlite3.connect(DATASET_DB_PATH)
     cur = conn.cursor()
     cur.executescript(
@@ -63,7 +63,10 @@ def seed_dataset_db(card="poisoned"):
         rows,
     )
 
-    card_content = CARD_PATHS[card].read_text(encoding="utf-8")
+    # a judge's own hand-typed card takes priority over the presets — this is
+    # the live prompt-injection surface: whatever they write, get_dataset_card
+    # returns verbatim and the agent reasons over it for real
+    card_content = card_text.strip() if card == "custom" and card_text.strip() else CARD_PATHS[card].read_text(encoding="utf-8")
     cur.execute("INSERT INTO dataset_card(id, content) VALUES (1, ?)", (card_content,))
 
     conn.commit()
@@ -105,9 +108,9 @@ def seed_registry_db(model_result="clears", hash_match=True):
     conn.close()
 
 
-def seed(card="poisoned", model_result="clears", hash_match=True):
+def seed(card="poisoned", model_result="clears", hash_match=True, card_text=""):
     DATASET_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    n_labels = seed_dataset_db(card)
+    n_labels = seed_dataset_db(card, card_text)
     seed_registry_db(model_result, hash_match)
     return n_labels
 

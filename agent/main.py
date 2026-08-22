@@ -9,6 +9,8 @@
 
 import argparse
 import json
+import os
+import re
 import sqlite3
 import sys
 import time
@@ -191,6 +193,24 @@ class DirectExecutor:
         return result
 
 
+def _apply_mcp_credentials(session):
+    """The origin MCP servers now check a shared secret on every request
+    (mcp_servers/app.py RequireSharedSecret) — closes the gap where anyone
+    with the public tunnel URL could call delete_rows/promote_model directly,
+    bypassing ArmorIQ. agent.infra generated the secret and registered it with
+    ArmorIQ as each server's api_key auth; this process needs the matching
+    env vars so the SDK attaches it on invoke() too. Verified live that the
+    proxy forwards exactly this as a real X-API-Key header to the origin.
+    """
+    secret = session.get("mcp_shared_secret")
+    if not secret:
+        return  # older session file — enforcement just falls back to proxy-only
+    for s in session["servers"].values():
+        safe = re.sub(r"[^A-Z0-9]", "_", s["id"].upper())
+        os.environ[f"ARMORIQ_MCP_{safe}_AUTH_TYPE"] = "api_key"
+        os.environ[f"ARMORIQ_MCP_{safe}_API_KEY"] = secret
+
+
 class GuardedExecutor:
     """--guarded: every call routed through ArmorIQ first. Same reasoning, same
     prompts, same tool sequence as DirectExecutor — enforcement is the only
@@ -206,6 +226,7 @@ class GuardedExecutor:
             )
         session = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
         self.map = {name: s["id"] for name, s in session["servers"].items()}
+        _apply_mcp_credentials(session)
         self.guard = ArmorGuard(
             run_id, build_plan(self.map, cfg), llm_name=OPENROUTER_MODEL,
             hold_timeout=hold_timeout,

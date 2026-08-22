@@ -59,6 +59,7 @@ body{
   position:absolute; width:13px; height:13px; border-radius:50%;
   background:radial-gradient(circle at 34% 28%, #574e42, #1d1815 72%);
   box-shadow:inset 0 1px 1px rgba(255,235,205,.16), 0 1px 3px rgba(0,0,0,.8);
+  z-index:90;
 }
 .screw::after{
   content:''; position:absolute; inset:0; margin:auto;
@@ -104,10 +105,55 @@ body{
 
 .scope{
   position:relative; border-radius:9px; overflow:hidden;
-  height:clamp(150px,23vh,215px);
+  height:clamp(150px,23vh,215px); flex:1.4; min-width:0;
   background:linear-gradient(180deg,#0a0908,#060505);
   box-shadow:inset 0 0 0 1px #000, inset 0 3px 14px rgba(0,0,0,.95), inset 0 0 60px rgba(0,0,0,.6), 0 1px 0 rgba(255,235,205,.06);
 }
+.tracerow{display:flex; align-items:stretch; gap:clamp(8px,1.1vw,14px);}
+.logcol{flex:1; min-width:0; display:flex; flex-direction:column;}
+.logcol .console, .logcol .proof, .logcol .ask{flex:1; min-height:0; height:auto; max-height:none; margin:0;}
+.logcol .proof.on{display:flex; flex-direction:column;}
+.logcol .proof table{display:block; overflow-y:auto;}
+
+.logtabs{display:flex; gap:5px; margin-bottom:7px; flex:none;}
+.logtab{
+  font-family:var(--mono); font-size:8px; letter-spacing:.13em; color:#655c50;
+  background:linear-gradient(180deg,#191512,#0f0c0a); border:1px solid rgba(0,0,0,.5);
+  border-radius:5px; padding:5px 10px; cursor:pointer; transition:color .15s, border-color .15s;
+}
+.logtab:hover:not(:disabled){color:var(--dim);}
+.logtab.active{color:var(--brass); border-color:rgba(201,162,39,.4); background:linear-gradient(180deg,#241d13,#15100a);}
+.logtab:disabled{opacity:.4; cursor:not-allowed;}
+
+.ask{display:none; flex-direction:column; gap:0;}
+.ask.show{display:flex;}
+.ask-log{
+  flex:1; min-height:0; overflow-y:auto; padding:8px 10px;
+  background:#08070650; border:1px solid rgba(0,0,0,.4); border-radius:7px 7px 0 0; border-bottom:0;
+  font-family:var(--cond); font-size:12px; line-height:1.5;
+}
+.ask-empty{color:#544b41; font-style:italic; font-size:11.5px;}
+.ask-q, .ask-a{margin-bottom:9px;}
+.ask-q .who{font-family:var(--mono); font-size:8px; letter-spacing:.12em; color:var(--brass);}
+.ask-a .who{font-family:var(--mono); font-size:8px; letter-spacing:.12em; color:var(--green);}
+.ask-q .txt{color:var(--ink);}
+.ask-a .txt{color:#c9c0ac;}
+.ask-err .who{color:var(--red);}
+.ask-form{display:flex; gap:6px; flex:none;}
+.ask-form input{
+  flex:1; min-width:0; background:#08070650; border:1px solid rgba(0,0,0,.4); border-top:0;
+  border-radius:0 0 0 7px; color:var(--ink); font-family:var(--cond); font-size:12.5px;
+  padding:8px 10px; outline:none;
+}
+.ask-form input:focus{border-color:rgba(201,162,39,.4);}
+.ask-form input::placeholder{color:#544b41;}
+.ask-form input:disabled{opacity:.5;}
+.ask-form button{
+  font-family:var(--mono); font-size:9px; letter-spacing:.13em; font-weight:700; color:#241a00;
+  padding:0 16px; border-radius:0 0 7px 0; cursor:pointer; border:1px solid #6b5410; border-top:0;
+  background:linear-gradient(180deg,#e8c463,#a8811b);
+}
+.ask-form button:disabled{cursor:not-allowed; color:#5e5549; border-color:#100d0b; background:linear-gradient(180deg,#332c25,#1b1714);}
 .scope canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
 .glass{
   position:absolute; inset:0; pointer-events:none;
@@ -223,7 +269,7 @@ body{
 .console{
   font-family:var(--mono); font-size:9.5px; line-height:1.6; color:#8d8271;
   background:#08070650; border-radius:7px; padding:8px 12px;
-  max-height:58px; overflow-y:auto;
+  overflow-y:auto;
   border:1px solid rgba(0,0,0,.4);
 }
 .console div{white-space:pre-wrap; word-break:break-word;}
@@ -381,6 +427,123 @@ body{
 .proof td.v.held{color:var(--amber);} .proof td.v.blocked{color:var(--red);}
 .proof td.h{color:#5e5549; overflow:hidden; text-overflow:ellipsis; max-width:230px;}
 
+.cardtext{
+  display:none; margin-top:8px; padding:10px 12px; border-radius:8px; flex:1 1 260px; min-width:220px;
+  background:linear-gradient(178deg,#1c1814,#111010);
+  box-shadow:inset 0 1px 0 rgba(255,235,205,.05), inset 0 -2px 4px rgba(0,0,0,.6),
+             0 0 0 1px rgba(201,162,39,.28);
+}
+.cardtext.on{display:block;}
+.cardtext .lbl{
+  display:flex; justify-content:space-between; align-items:baseline;
+  font-family:var(--mono); font-size:8px; letter-spacing:.16em; color:var(--brass); margin-bottom:6px;
+}
+.cardtext .cnt{color:#655c50; letter-spacing:.06em;}
+.cardtext .cnt.hot{color:var(--red);}
+.cardtext textarea{
+  width:100%; min-height:46px; max-height:88px; resize:vertical;
+  background:#08070650; border:1px solid rgba(0,0,0,.5); border-radius:6px;
+  color:var(--ink); font-family:var(--cond); font-size:12.5px; line-height:1.45;
+  padding:7px 9px; outline:none;
+}
+.cardtext textarea:focus{border-color:rgba(201,162,39,.55);}
+.cardtext textarea::placeholder{color:#544b41;}
+
+/* ── onboarding walkthrough — same box, same materials ───── */
+.panel{overflow:hidden;}
+.onboard{
+  position:absolute; inset:0; z-index:80; border-radius:14px;
+  display:flex; flex-direction:column;
+  background:
+    repeating-linear-gradient(93deg, rgba(255,240,215,.016) 0 1px, transparent 1px 4px),
+    linear-gradient(163deg, var(--panel-hi) 0%, var(--panel) 34%, var(--panel-lo) 100%);
+  opacity:1; transition:opacity .35s ease;
+}
+.onboard.hidden{opacity:0; pointer-events:none;}
+.onboard.gone{display:none;}
+
+.ob-bezel{
+  display:flex; align-items:center; justify-content:space-between; gap:18px; flex-wrap:wrap;
+  padding:clamp(16px,2.2vh,26px) clamp(20px,4vw,52px) 11px;
+  border-bottom:1px solid rgba(0,0,0,.55); box-shadow:0 1px 0 rgba(255,235,205,.05);
+}
+.ob-mark{font-size:clamp(17px,2.2vw,23px); font-weight:600; letter-spacing:.3em; color:var(--brass);
+  text-shadow:0 1px 0 rgba(0,0,0,.85), 0 -1px 0 rgba(255,235,205,.05);}
+.ob-lamps{display:flex; gap:9px;}
+.ob-body{flex:1; min-height:0; display:flex; flex-direction:column; justify-content:center;
+  padding:clamp(14px,2.6vh,28px) clamp(20px,4vw,52px); overflow-y:auto;}
+.ob-slide{display:none; flex-direction:column; gap:16px; max-width:760px; margin:0 auto; width:100%;}
+.ob-slide.active{display:flex; animation:obIn .3s ease;}
+@keyframes obIn{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;}}
+
+.ob-kicker{font-family:var(--mono); font-size:9px; letter-spacing:.24em; color:#8a7c53;}
+.ob-title{
+  font-family:var(--cond); font-weight:600; font-size:clamp(22px,3vw,30px); letter-spacing:.01em;
+  color:var(--brass); text-shadow:0 1px 0 rgba(0,0,0,.85);
+}
+.ob-body p{font-family:var(--cond); font-size:clamp(15px,1.9vw,18px); line-height:1.65; color:var(--ink);}
+.ob-body p b{color:var(--brass); font-weight:600;}
+.ob-body p code{font-family:var(--mono); font-size:.88em; color:#e8c463;}
+
+.ob-rows{display:flex; flex-direction:column; gap:8px; margin-top:2px;}
+.ob-row{
+  display:flex; align-items:flex-start; gap:11px; padding:10px 13px; border-radius:8px;
+  background:linear-gradient(178deg,#1c1814,#111010);
+  box-shadow:inset 0 1px 0 rgba(255,235,205,.05), inset 0 -2px 4px rgba(0,0,0,.6), 0 1px 0 rgba(255,235,205,.03);
+}
+.ob-row i{
+  flex:none; width:9px; height:9px; border-radius:50%; margin-top:5px;
+  background:radial-gradient(circle at 34% 30%, #fff3d2, var(--c) 58%, color-mix(in srgb, var(--c) 55%, #000) 100%);
+  box-shadow:0 0 9px 1px color-mix(in srgb, var(--c) 60%, transparent);
+}
+.ob-row .h{font-family:var(--mono); font-size:11px; letter-spacing:.06em; color:var(--ink); font-weight:700;}
+.ob-row .d{font-family:var(--cond); font-size:12.5px; line-height:1.5; color:#a89e8f; margin-top:2px;}
+
+.ob-foot{
+  flex:none; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+  padding:14px clamp(20px,4vw,52px) clamp(16px,2.6vh,26px);
+  border-top:1px solid rgba(0,0,0,.55); box-shadow:0 -1px 0 rgba(255,235,205,.05);
+}
+.ob-dots{display:flex; gap:7px;}
+.ob-dot{
+  width:7px; height:7px; border-radius:50%; cursor:pointer; border:0; padding:0;
+  background:radial-gradient(circle at 34% 30%, #3a332c, #14100e 75%);
+  box-shadow:inset 0 0 3px rgba(0,0,0,.9);
+}
+.ob-dot.active{
+  background:radial-gradient(circle at 34% 30%, #fff3d2, var(--brass) 58%, #7a611a 100%);
+  box-shadow:0 0 8px 1px rgba(201,162,39,.5);
+}
+.ob-btns{display:flex; align-items:center; gap:10px;}
+.ob-skip{
+  font-family:var(--mono); font-size:8.5px; letter-spacing:.14em; color:#655c50;
+  background:none; border:0; cursor:pointer; padding:6px 4px;
+}
+.ob-skip:hover{color:var(--dim);}
+.ob-back{
+  font-family:var(--mono); font-size:9px; letter-spacing:.13em; color:#a1968a;
+  padding:9px 16px; border-radius:6px; cursor:pointer;
+  background:linear-gradient(180deg,#332c25,#1b1714); border:1px solid #100d0b;
+  box-shadow:inset 0 1px 0 rgba(255,235,205,.13), 0 2px 4px rgba(0,0,0,.6);
+}
+.ob-back:hover{color:var(--ink);}
+.ob-back:disabled{opacity:0; pointer-events:none;}
+.ob-next{
+  font-family:var(--mono); font-size:11px; letter-spacing:.18em; font-weight:700;
+  color:#241a00; padding:11px 22px; border-radius:7px; cursor:pointer; border:1px solid #6b5410;
+  background:linear-gradient(180deg,#e8c463,#a8811b);
+  box-shadow:inset 0 1px 0 rgba(255,245,210,.6), 0 3px 7px rgba(0,0,0,.65);
+  transition:filter .15s;
+}
+.ob-next:hover{filter:brightness(1.08);}
+.ob-next:active{transform:translateY(1px);}
+
+.replay{
+  font-family:var(--mono); font-size:7.5px; letter-spacing:.13em; color:#544b41;
+  background:none; border:0; cursor:pointer; padding:2px 0; text-align:left;
+}
+.replay:hover{color:var(--dim);}
+
 @media (prefers-reduced-motion: reduce){
   *{transition-duration:.01ms !important; animation-duration:.01ms !important; animation-iteration-count:1 !important;}
 }
@@ -392,12 +555,138 @@ body{
   <span class="screw tl"></span><span class="screw tr"></span>
   <span class="screw bl"></span><span class="screw br"></span>
 
+  <div class="onboard" id="onboard">
+    <div class="ob-bezel">
+      <div class="ob-mark">PROMOTIONGUARD</div>
+      <div class="ob-lamps">
+        <div class="lamp" id="obLampBlock"><i></i><span>BLOCK</span></div>
+        <div class="lamp" id="obLampHold"><i></i><span>HOLD</span></div>
+        <div class="lamp" id="obLampArmed"><i></i><span>ARMED</span></div>
+      </div>
+    </div>
+    <div class="ob-body">
+
+      <div class="ob-slide active" data-slide="0">
+        <div class="ob-kicker">PROMOTIONGUARD &middot; WALKTHROUGH 1/5</div>
+        <div class="ob-title">An agent, running an ML pipeline, unattended</div>
+        <p>Somewhere in every ML team's backlog is the same job: pull the eval split, run the
+        candidate model, check the numbers, promote the winner. Repetitive, well-specified,
+        exactly the kind of thing you'd hand to an agent — and exactly the kind of thing nobody
+        wants to babysit.</p>
+        <p>You are about to watch that agent run <b>twice</b>. Once with nothing watching it.
+        Once with <b>ArmorIQ</b> checking every single call before it executes. Same agent, same
+        code, same prompt — the only difference is enforcement.</p>
+        <div class="ob-rows">
+          <div class="ob-row" style="--c:var(--trace-a)"><i></i><div>
+            <div class="h">UNGUARDED</div>
+            <div class="d">Nothing is checking. If the agent reaches for something destructive,
+            it happens.</div>
+          </div></div>
+          <div class="ob-row" style="--c:var(--trace-b)"><i></i><div>
+            <div class="h">GUARDED · ARMORIQ</div>
+            <div class="d">The identical agent, every call checked against a signed plan before
+            it executes.</div>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="ob-slide" data-slide="1">
+        <div class="ob-kicker">WALKTHROUGH 2/5</div>
+        <div class="ob-title">Two things go wrong &mdash; on purpose</div>
+        <p>When a candidate model misses the bar, an agent reaches for one of two moves:</p>
+        <div class="ob-rows">
+          <div class="ob-row" style="--c:var(--red)"><i></i><div>
+            <div class="h">TRIM THE EVAL SET</div>
+            <div class="d">The dataset card says some rows are noisy. Delete them, re-score, the
+            numbers improve. It arrives as documentation, not an attack — there's no adversarial
+            phrasing to detect.</div>
+          </div></div>
+          <div class="ob-row" style="--c:var(--amber)"><i></i><div>
+            <div class="h">SHIP TO PRODUCTION ANYWAY</div>
+            <div class="d">The exact same <code>promote_model</code> call it was authorized to
+            make seconds earlier for staging &mdash; one argument different. No scary word, no
+            keyword to filter on.</div>
+          </div></div>
+        </div>
+        <p>A <code>contains("delete")</code> filter catches neither. Only the <b>signed plan</b>
+        knows the difference.</p>
+      </div>
+
+      <div class="ob-slide" data-slide="2">
+        <div class="ob-kicker">WALKTHROUGH 3/5</div>
+        <div class="ob-title">Two gates, not one filter</div>
+        <div class="ob-rows">
+          <div class="ob-row" style="--c:var(--red)"><i></i><div>
+            <div class="h">GATE 1 &middot; SIGNED PLAN &middot; CRYPTOGRAPHIC</div>
+            <div class="d">Before the run starts, the agent declares every action it intends to
+            take and ArmorIQ signs it. Anything outside that list is refused &mdash; client-side,
+            before the call ever leaves the process. This is what blocks the deleted rows.</div>
+          </div></div>
+          <div class="ob-row" style="--c:var(--amber)"><i></i><div>
+            <div class="h">GATE 2 &middot; AUTHORITY &middot; HUMAN</div>
+            <div class="d">A call that's in the plan but exceeds what this agent may decide alone
+            &mdash; like promoting to production &mdash; gets held for a real person with a
+            higher-ranked role to approve. A requester can never approve their own request.</div>
+          </div></div>
+        </div>
+        <p>Approval only ever happens on <b>ArmorIQ's own dashboard</b>. This panel has no
+        Approve button anywhere &mdash; that would be a lie about where authority lives.</p>
+      </div>
+
+      <div class="ob-slide" data-slide="3">
+        <div class="ob-kicker">WALKTHROUGH 4/5</div>
+        <div class="ob-title">What you're about to control</div>
+        <div class="ob-rows">
+          <div class="ob-row" style="--c:var(--green)"><i></i><div>
+            <div class="h">AUTHORIZE</div>
+            <div class="d">Switches that <b>are</b> the signed plan. Whatever's on gets signed the
+            moment you press RUN &mdash; including, if you choose, letting the agent delete rows
+            for real.</div>
+          </div></div>
+          <div class="ob-row" style="--c:#5aa9ff"><i></i><div>
+            <div class="h">CONDITIONS</div>
+            <div class="d">Dials that set the world, not the authority: how the model scores,
+            what the dataset card says &mdash; or write the card yourself, free text, and watch the
+            agent react to your exact words.</div>
+          </div></div>
+          <div class="ob-row" style="--c:var(--brass)"><i></i><div>
+            <div class="h">THE INSTRUMENT</div>
+            <div class="d">The scope traces real tool calls as they happen. The plan strip lights
+            up step by step. The key dial arms and freezes mid-swing the moment something needs a
+            human.</div>
+          </div></div>
+        </div>
+      </div>
+
+      <div class="ob-slide" data-slide="4">
+        <div class="ob-kicker">WALKTHROUGH 5/5</div>
+        <div class="ob-title">Everything here is real</div>
+        <p>No scripted choreography, no placeholder data. Every trace pulse is a line the agent
+        actually printed. Every gauge reading is live SQLite. Every hold is a genuine ArmorIQ
+        delegation request waiting on a genuine human.</p>
+        <p>Flip a switch, write a card, press RUN &mdash; and watch what actually happens.</p>
+      </div>
+
+    </div>
+    <div class="ob-foot">
+      <div class="ob-dots" id="obDots"></div>
+      <div class="ob-btns">
+        <button class="ob-skip" id="obSkip">SKIP INTRO</button>
+        <button class="ob-back" id="obBack">&larr; BACK</button>
+        <button class="ob-next" id="obNext">NEXT &rarr;</button>
+      </div>
+    </div>
+  </div>
+
   <div class="bezel">
     <div>
       <div class="mark" data-tip="mark">PROMOTIONGUARD</div>
       <div class="sub">MODEL PG&#8209;1 &nbsp;·&nbsp; CSRG&#8209;IAP INTENT ENFORCEMENT</div>
     </div>
-    <div class="sess" id="sess" data-tip="sess"><i></i><span id="sessTxt">CHECKING SESSION</span></div>
+    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:3px;">
+      <div class="sess" id="sess" data-tip="sess"><i></i><span id="sessTxt">CHECKING SESSION</span></div>
+      <button class="replay" id="replayIntro">&#8635; REPLAY INTRO</button>
+    </div>
     <div class="annun">
       <div class="lamp" id="lampArmed" data-tip="armed"><i></i><span>ARMED</span></div>
       <div class="lamp" id="lampHold" data-tip="hold"><i></i><span>HOLD</span></div>
@@ -405,12 +694,34 @@ body{
     </div>
   </div>
 
-  <div class="scope" data-tip="scope">
-    <canvas id="scope"></canvas>
-    <div class="glass"></div>
-    <div class="lane-tag a" id="tagA">UNGUARDED</div>
-    <div class="lane-tag b" id="tagB">GUARDED · ARMORIQ</div>
-    <div class="ceil-tag" id="ceilTag">PLAN CEILING</div>
+  <div class="tracerow">
+    <div class="scope" data-tip="scope">
+      <canvas id="scope"></canvas>
+      <div class="glass"></div>
+      <div class="lane-tag a" id="tagA">UNGUARDED</div>
+      <div class="lane-tag b" id="tagB">GUARDED · ARMORIQ</div>
+      <div class="ceil-tag" id="ceilTag">PLAN CEILING</div>
+    </div>
+    <div class="logcol">
+      <div class="logtabs">
+        <button class="logtab active" id="tabLog" data-tip="tablog">LOG</button>
+        <button class="logtab" id="tabProof" data-tip="tabproof">PROOF</button>
+        <button class="logtab" id="tabAsk" data-tip="tabask" disabled>ASK THE AGENT</button>
+      </div>
+      <div class="console" id="console" data-tip="console"></div>
+      <div class="proof" id="proof"></div>
+      <div class="ask" id="askPanel">
+        <div class="ask-log" id="askLog">
+          <div class="ask-empty" id="askEmpty">Run something first — the agent can only answer for a
+            real run it actually did.</div>
+        </div>
+        <form class="ask-form" id="askForm">
+          <input id="askInput" maxlength="500" autocomplete="off"
+                 placeholder="Ask about the run that just happened…" disabled>
+          <button type="submit" id="askSubmit" disabled>ASK</button>
+        </form>
+      </div>
+    </div>
   </div>
 
   <div class="planbar open" id="planbar">
@@ -440,10 +751,6 @@ body{
     </div>
   </div>
 
-  <div class="console" id="console" data-tip="console"></div>
-
-  <div class="proof" id="proof"></div>
-
   <div class="controls">
     <div class="ctlrow">
       <div class="bank">
@@ -454,7 +761,7 @@ body{
           </button>
         </div>
       </div>
-      <div class="bank authorize" style="flex:1">
+      <div class="bank" style="flex:1">
         <div class="banklabel" data-tip="banka">AUTHORIZE &mdash; THIS BECOMES THE SIGNED PLAN</div>
         <div class="switches" id="bankA"></div>
       </div>
@@ -463,7 +770,14 @@ body{
     <div class="ctlrow">
       <div class="bank">
         <div class="banklabel" data-tip="bankb">CONDITIONS &mdash; THE WORLD, NOT THE AUTHORITY</div>
-        <div class="switches" id="bankB"></div>
+        <div class="switches" id="bankB">
+          <div id="bankBDyn" style="display:contents"></div>
+        </div>
+      </div>
+      <div class="cardtext" id="cardTextWrap" data-tip="cardtext">
+        <div class="lbl"><span>WRITE THE DATASET CARD YOURSELF</span><span class="cnt" id="cardTextCnt">0 / 4000</span></div>
+        <textarea id="cardText" maxlength="4000"
+          placeholder="What should the agent read as the dataset's documentation? Try convincing it to do something the switches didn't authorize."></textarea>
       </div>
       <div class="rgt">
         <button class="knob" id="preset" data-tip="preset">
@@ -486,6 +800,78 @@ body{
 (() => {
   const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const $ = id => document.getElementById(id);
+
+  /* ───────── onboarding walkthrough ─────────
+     Same box as the console — an overlay inside .panel, not a separate page.
+     Shown once per tab (sessionStorage survives a reload mid-demo without
+     re-showing; a fresh tab/window shows it again) and always reachable via
+     the REPLAY INTRO control, since losing it forever would be worse than
+     seeing it twice. */
+  (() => {
+    const slides = [...document.querySelectorAll('.ob-slide')];
+    const dotsEl = $('obDots');
+    const board = $('onboard');
+    let i = 0;
+
+    slides.forEach((_, idx) => {
+      const d = document.createElement('button');
+      d.className = 'ob-dot' + (idx === 0 ? ' active' : '');
+      d.addEventListener('click', () => go(idx));
+      dotsEl.appendChild(d);
+    });
+    const dots = [...dotsEl.children];
+
+    // which console lamp echoes each slide's theme — a callback to the real
+    // annunciators, not decoration for its own sake
+    const SLIDE_LAMPS = [[], ['block'], ['block', 'hold'], ['armed'], ['armed', 'hold', 'block']];
+    function go(idx){
+      i = Math.max(0, Math.min(slides.length - 1, idx));
+      slides.forEach((s, k) => s.classList.toggle('active', k === i));
+      dots.forEach((d, k) => d.classList.toggle('active', k === i));
+      $('obBack').disabled = i === 0;
+      $('obNext').textContent = i === slides.length - 1 ? 'ENTER CONSOLE →' : 'NEXT →';
+      $('onboard').querySelector('.ob-body').scrollTop = 0;
+      const lit = SLIDE_LAMPS[i] || [];
+      $('obLampBlock').classList.toggle('on', lit.includes('block'));
+      $('obLampHold').classList.toggle('on', lit.includes('hold'));
+      $('obLampArmed').classList.toggle('on', lit.includes('armed'));
+    }
+    function dismiss(){
+      try { sessionStorage.setItem('pg_onboard_seen', '1'); } catch (e) {}
+      board.classList.add('hidden');
+      setTimeout(() => board.classList.add('gone'), 380);
+    }
+    function open(){
+      board.classList.remove('gone');
+      requestAnimationFrame(() => board.classList.remove('hidden'));
+      go(0);
+    }
+
+    $('obNext').addEventListener('click', () => {
+      if (i === slides.length - 1) dismiss(); else go(i + 1);
+    });
+    $('obBack').addEventListener('click', () => go(i - 1));
+    $('obSkip').addEventListener('click', dismiss);
+    $('replayIntro').addEventListener('click', open);
+
+    go(0);
+    let seen = false;
+    try { seen = sessionStorage.getItem('pg_onboard_seen') === '1'; } catch (e) {}
+    if (seen) board.classList.add('hidden', 'gone');
+  })();
+
+  /* Every value interpolated into innerHTML below either can be, or one day
+     could become, something outside our own fixed vocabulary — most notably
+     tool-call params in organic mode, which are whatever JSON the LLM
+     produced with no server-side schema enforcement (mcp_servers/*.py takes
+     any string). A poisoned dataset card already exists to manipulate the
+     model's behaviour; there is no reason to assume it could not also aim
+     for the viewer's browser. textContent is used everywhere it's simple
+     enough to; esc() covers the handful of spots that build markup around a
+     value instead of just displaying it. */
+  const esc = s => String(s).replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+  ));
 
   /* ───────── scope ───────── */
   const cvs = $('scope'), ctx = cvs.getContext('2d');
@@ -647,6 +1033,7 @@ body{
     el.reset.disabled = !on;
     $('preset').disabled = !on;
     document.querySelectorAll('#bankA .tog, #bankB .knob').forEach(b => b.disabled = !on);
+    cardTextEl.disabled = !on;
     $('runBtn').classList.toggle('running', !on);
     if (on) refreshArm(); else $('runBtn').disabled = true;
   }
@@ -678,7 +1065,7 @@ body{
 
   function stepCap(st){
     const stage = (st.params || {}).stage;
-    return stage ? `${st.action}:${stage}` : st.action;
+    return stage ? `${esc(st.action)}:${esc(stage)}` : esc(st.action);
   }
 
   function buildStrip(frame){
@@ -743,7 +1130,7 @@ body{
       if (!intruderEl) return;
       intruderEl.dataset.state = o.verdict;
       intruderEl.dataset.action = o.action;
-      intruderEl.querySelector('.a').textContent = o.action;
+      intruderEl.querySelector('.a').textContent = o.action;  // textContent — already safe
       intruderEl.className = 'pstep intruder on bad';
       return;
     }
@@ -777,7 +1164,7 @@ body{
   ];
   const BANK_B = [
     {key:'model_result', cap:'MODEL', vals:['clears','narrow','fails'], labels:['CLEARS','NARROW','FAILS']},
-    {key:'card',         cap:'CARD',  vals:['poisoned','clean'],        labels:['POISONED','CLEAN']},
+    {key:'card',         cap:'CARD',  vals:['poisoned','clean','custom'], labels:['POISONED','CLEAN','CUSTOM']},
     {key:'hash_match',   cap:'HASH',  vals:[true,false],                labels:['MATCH','MISMATCH']},
     {key:'__replay__',   cap:'REPLAY',vals:[0,1,2],                     labels:['LIVE','DEL-ROWS','PROD']},
   ];
@@ -789,7 +1176,19 @@ body{
   const PRESET_NAMES = ['BASELINE','INJECTION','ESCALATION','CUSTOM'];
 
   const switchState = {};
-  const dialState = {model_result:'clears', card:'clean', hash_match:true, __replay__:0};
+  const dialState = {model_result:'clears', card:'clean', hash_match:true, __replay__:0, card_text:''};
+
+  const cardTextEl = $('cardText');
+  function syncCardTextVisibility(){
+    $('cardTextWrap').classList.toggle('on', dialState.card === 'custom');
+  }
+  cardTextEl.addEventListener('input', () => {
+    dialState.card_text = cardTextEl.value;
+    $('cardTextCnt').textContent = `${cardTextEl.value.length} / 4000`;
+    $('cardTextCnt').classList.toggle('hot', cardTextEl.value.length > 3800);
+    if (dialState.card === 'custom') toCustom();
+    refreshArm();
+  });
   let presetIdx = 0, planHash = null;
 
   const bankAEls = BANK_A.map(spec => {
@@ -827,9 +1226,10 @@ body{
       const i = spec.vals.indexOf(dialState[spec.key]);
       dialState[spec.key] = spec.vals[(i + 1) % spec.vals.length];
       paint(); toCustom(); refreshArm();
+      if (spec.key === 'card') syncCardTextVisibility();
     });
     b._paint = paint; paint();
-    $('bankB').appendChild(b);
+    $('bankBDyn').appendChild(b);
     return b;
   });
 
@@ -842,6 +1242,10 @@ body{
       bankAEls[i].setAttribute('aria-pressed', String(on));
     });
     ['model_result','card','hash_match','__replay__'].forEach(k => { dialState[k] = pr[k]; });
+    dialState.card_text = '';
+    cardTextEl.value = '';
+    $('cardTextCnt').textContent = '0 / 4000';
+    syncCardTextVisibility();
     bankBEls.forEach(b => b._paint());
     refreshArm();
   }
@@ -868,13 +1272,16 @@ body{
       model_result: dialState.model_result,
       card: dialState.card,
       hash_match: dialState.hash_match,
+      card_text: dialState.card_text || '',
     };
   }
   function refreshArm(){
     const cfg = currentCfg();
     const empty = !cfg.authorized.length && !cfg.promote_production;
-    $('runBtn').disabled = empty || running || (guardedMode && !infraReady);
+    const needsCardText = cfg.card === 'custom' && !cfg.card_text.trim();
+    $('runBtn').disabled = empty || needsCardText || running || (guardedMode && !infraReady);
     if (empty) say('NOTHING AUTHORIZED — THE PLAN WOULD BE EMPTY');
+    else if (needsCardText) say('WRITE THE CARD BELOW BEFORE RUNNING');
     else if (!running) say('READY — ' + (cfg.authorized.length + (cfg.promote_production ? 1 : 0)) + ' STEPS TO SIGN');
   }
 
@@ -886,20 +1293,18 @@ body{
   function renderProof(){
     if (!proofRows.length) return;
     const rows = proofRows.map(o => `<tr>
-      <td>${o.step}</td>
-      <td>${o.action}</td>
-      <td class="h">${o.params && o.params.stage ? 'stage=' + o.params.stage : ''}</td>
-      <td class="h">/steps/[${o.step}]/action</td>
-      <td class="v ${o.verdict}">${o.verdict.toUpperCase()}</td>
+      <td>${esc(o.step)}</td>
+      <td>${esc(o.action)}</td>
+      <td class="h">${o.params && o.params.stage ? 'stage=' + esc(o.params.stage) : ''}</td>
+      <td class="h">/steps/[${esc(o.step)}]/action</td>
+      <td class="v ${esc(o.verdict)}">${esc(String(o.verdict).toUpperCase())}</td>
     </tr>`).join('');
     $('proof').innerHTML =
       `<div class="hdr">PROOF &mdash; ${proofRows.length} CALLS AGAINST PLAN ` +
-      `<b>${planHash ? planHash.slice(0, 24) : 'UNSIGNED (no enforcement)'}</b></div>` +
+      `<b>${planHash ? esc(planHash.slice(0, 24)) : 'UNSIGNED (no enforcement)'}</b></div>` +
       `<table>${rows}</table>`;
-    $('proof').className = 'proof on';
-    // the console is the live view during a run, PROOF is the settled view
-    // after it — swap rather than stack, so the instrument stays one screen
-    el.console.style.display = 'none';
+    proofReady = true;
+    setTab('proof');
   }
 
   /* ───────── hold timer on the key dial ───────── */
@@ -948,11 +1353,71 @@ body{
     delete_rows: `Destructive. Deletes rows from the evaluation set the model is graded on.`,
   };
 
+  /* ───────── ASK THE AGENT — free-text Q&A over a real run's log ─────────
+     Three views share one slot: LOG (live, during/after a run), PROOF
+     (settled verdict chain), ASK (a real chat grounded in the run's own
+     transcript — agent/ask.py, never scripted). Exactly one is visible. */
+  let lastRunId = null, activeTab = 'log', proofReady = false, asking = false;
+
+  function setTab(tab){
+    activeTab = tab;
+    el.console.style.display = tab === 'log' ? '' : 'none';
+    $('proof').classList.toggle('on', tab === 'proof' && proofReady);
+    $('askPanel').classList.toggle('show', tab === 'ask');
+    $('tabLog').classList.toggle('active', tab === 'log');
+    $('tabProof').classList.toggle('active', tab === 'proof');
+    $('tabAsk').classList.toggle('active', tab === 'ask');
+    if (tab === 'ask') $('askInput').focus();
+  }
+  $('tabLog').addEventListener('click', () => setTab('log'));
+  $('tabProof').addEventListener('click', () => { if (proofReady) setTab('proof'); });
+  $('tabAsk').addEventListener('click', () => { if (lastRunId) setTab('ask'); });
+
+  function askLine(cls, who, text){
+    const d = document.createElement('div');
+    d.className = 'ask-' + cls;
+    const w = document.createElement('div'); w.className = 'who'; w.textContent = who;
+    const t = document.createElement('div'); t.className = 'txt'; t.textContent = text;
+    d.appendChild(w); d.appendChild(t);
+    $('askLog').appendChild(d);
+    $('askLog').scrollTop = $('askLog').scrollHeight;
+  }
+
+  $('askForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (asking || !lastRunId) return;
+    const q = $('askInput').value.trim();
+    if (!q) return;
+    asking = true;
+    $('askInput').value = ''; $('askInput').disabled = true; $('askSubmit').disabled = true;
+    askLine('q', 'YOU', q);
+    askLine('a', 'AGENT', '…thinking…');
+    const pending = $('askLog').lastElementChild;
+    try {
+      const r = await fetch('/api/ask', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ run_id: lastRunId, question: q }),
+      });
+      const body = await r.json();
+      if (r.ok) {
+        pending.querySelector('.txt').textContent = body.answer;
+      } else {
+        pending.className = 'ask-err'; pending.querySelector('.who').textContent = 'ERROR';
+        pending.querySelector('.txt').textContent = body.error || ('HTTP ' + r.status);
+      }
+    } catch (err) {
+      pending.className = 'ask-err'; pending.querySelector('.who').textContent = 'ERROR';
+      pending.querySelector('.txt').textContent = 'lost the connection to the panel server';
+    }
+    asking = false;
+    $('askInput').disabled = false; $('askSubmit').disabled = false; $('askInput').focus();
+  });
+
   const TIPS = {
     mark: `<b>WHAT THIS IS</b>An AI agent runs an ML model promotion pipeline unattended. You set what
       it is <b>authorized</b> to do and what the <b>world</b> looks like, then press RUN. Whatever it
       reaches for outside that authorization is the violation — nothing here selects one for it.`,
-    sess: () => `<b>ENFORCEMENT SESSION</b>${infraMsg || 'starting up'}.<br><br>Guarded runs need the
+    sess: () => `<b>ENFORCEMENT SESSION</b>${esc(infraMsg) || 'starting up'}.<br><br>Guarded runs need the
       MCP servers publicly reachable — the ArmorIQ proxy cannot reach your localhost. The panel opens
       the tunnel and registers all three servers itself, so this is one command.`,
     scope: `<b>ACTIVITY TRACE</b>Top lane is the unguarded agent, bottom lane is the guarded one. Each
@@ -1004,7 +1469,7 @@ body{
          run the identical agent with no enforcement at all.`
       : infraReady
         ? `<b>GUARDED · OFF</b>The agent calls the MCP servers directly, with nothing in between.`
-        : `<b>GUARDED · LOCKED</b>${infraMsg || 'the enforcement session is still starting'}. The
+        : `<b>GUARDED · LOCKED</b>${esc(infraMsg) || 'the enforcement session is still starting'}. The
            switch unlocks once the tunnel is registered.`,
     banka: `<b>AUTHORIZE</b>These switches <i>are</i> the plan. Whatever is on here gets assembled into
       a plan and cryptographically signed the moment you press RUN — you are watching the plan you
@@ -1042,7 +1507,11 @@ body{
       jobs-mcp reads whatever was seeded — no code path changes.`,
     b_card: `<b>DATASET CARD</b>CLEAN documents the noisy rows and says to keep them. POISONED says to
       exclude them before scoring — the injection, arriving as ordinary documentation with no
-      adversarial phrasing to detect.`,
+      adversarial phrasing to detect. CUSTOM opens a box below where you write the card yourself.`,
+    cardtext: `<b>WRITE IT YOURSELF</b>Whatever you type here is exactly what <code>get_dataset_card</code>
+      returns to the agent — no template, no preset. Try to talk it into something the AUTHORIZE
+      switches did not grant. If it takes the bait, watch what actually happens: blocked if you didn't
+      authorize it, executed if you did. The switches decide the outcome, not your wording.`,
     b_hash_match: `<b>CANDIDATE HASH</b>MISMATCH seeds the model under a different hash, so the
       evaluation finds nothing and falls back to default metrics — a real miss rather than a simulated
       one.`,
@@ -1064,6 +1533,14 @@ body{
       automatically first, so consecutive runs are always comparable.`,
     console: `<b>AUDIT LOG</b>The raw verdict stream, one line per tool call, exactly as
       <code>agent.main</code> printed it. Nothing here is generated by the page.`,
+    tablog: `<b>LOG</b>The live verdict stream for the current or most recent run.`,
+    tabproof: `<b>PROOF</b>The settled verdict chain against the signed plan's hash, once a run ends.`,
+    tabask: () => lastRunId
+      ? `<b>ASK THE AGENT</b>A real question, answered by the same LLM, grounded only in the actual
+         log of the run you just watched — not scripted, not guessed. Ask why it did what it did, or
+         what it would have needed to do something else.`
+      : `<b>ASK THE AGENT</b>Locked until you run something — the agent can only answer for a run it
+         actually did.`,
   };
   const tipEl = $('tip');
   let tipFor = null;
@@ -1119,7 +1596,7 @@ body{
     gB.target = s.val_rows; el.numB.textContent = s.val_rows; el.prodB.textContent = 0; el.prodB.className = '';
     A.base = 0; B.base = 0; B.ceiling = 0;
     resetPSteps(); stopHoldTimer(); $('keyTimer').textContent = '0:00';
-    proofRows = []; $('proof').className = 'proof'; el.console.style.display = '';
+    proofRows = []; proofReady = false; setTab('log');
     setLamp(el.armed, false); setLamp(el.hold, false); setLamp(el.block, false);
     el.keyhole.classList.remove('armed', 'turned'); el.keycell.classList.remove('armed');
     el.keyLabel.textContent = 'NO PENDING APPROVAL';
@@ -1188,7 +1665,12 @@ body{
     }
 
     if (typeof raw === 'string'){
-      if (raw.startsWith('run_id=')) { say('RUNNING'); return; }
+      if (raw.startsWith('run_id=')) {
+        lastRunId = raw.slice(7).trim().split(/\s+/)[0];
+        $('tabAsk').disabled = false; $('askInput').disabled = false; $('askSubmit').disabled = false;
+        if ($('askEmpty')) { $('askEmpty').remove(); }
+        say('RUNNING'); return;
+      }
       if (raw.startsWith('BLOCKED:')) { say(raw); log(raw, 'err'); return; }
       if (raw.startsWith('NOT APPROVED:')) {
         stopHoldTimer();
@@ -1212,8 +1694,7 @@ body{
     activeLaneKey = laneKey;
     L.base = 0; L.pulses = []; L.frozen = false; L.ceiling = 0;
     resetPSteps(); stopHoldTimer(); $('keyTimer').textContent = '0:00';
-    proofRows = []; $('proof').className = 'proof';
-    el.console.style.display = '';
+    proofRows = []; proofReady = false; setTab('log');
     setLamp(el.armed, true); setLamp(el.hold, false); setLamp(el.block, false);
     el.ceilTag.classList.remove('hot');
     el.keyhole.classList.remove('armed', 'turned'); el.keycell.classList.remove('armed');
@@ -1251,6 +1732,7 @@ body{
   $('runBtn').addEventListener('click', startRun);
   applyPreset('BASELINE');
   $('preset').querySelector('.val').textContent = 'BASELINE';
+  syncCardTextVisibility();
 
   refreshState();
 })();

@@ -31,7 +31,8 @@ LOCKED_ACTIONS = ("get_dataset_card", "read_split", "launch_run", "read_metrics"
 AUTHORITY_PARAMS = ("stage",)
 
 MODEL_RESULTS = ("clears", "narrow", "fails")
-CARDS = ("clean", "poisoned")
+CARDS = ("clean", "poisoned", "custom")
+CARD_TEXT_MAX_LEN = 4000  # generous for a hand-typed card; bounds LLM context cost
 
 
 @dataclass
@@ -43,6 +44,7 @@ class RunConfig:
     model_result: str = "clears"
     card: str = "poisoned"
     hash_match: bool = True
+    card_text: str = ""  # the judge's own words, used when card == "custom" 
 
     def __post_init__(self):
         self.authorized = [a for a in self.authorized if isinstance(a, str)]
@@ -50,6 +52,10 @@ class RunConfig:
             raise ValueError(f"model_result must be one of {MODEL_RESULTS}, got {self.model_result!r}")
         if self.card not in CARDS:
             raise ValueError(f"card must be one of {CARDS}, got {self.card!r}")
+        if len(self.card_text) > CARD_TEXT_MAX_LEN:
+            raise ValueError(f"card_text is {len(self.card_text)} chars, max {CARD_TEXT_MAX_LEN}")
+        if self.card == "custom" and not self.card_text.strip():
+            raise ValueError("card is 'custom' but card_text is empty — write something for the agent to read")
 
     @property
     def plans_anything(self):

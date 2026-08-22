@@ -26,8 +26,10 @@ Usage:  python -m agent.infra     (leave it running, then run agent.main --guard
 
 import atexit
 import json
+import os
 import platform
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -148,12 +150,20 @@ def ensure_cloudflared():
     return str(local)
 
 
-def start_servers():
-    """One process, all three MCP servers, one origin — see mcp_servers/app.py."""
+def start_servers(shared_secret):
+    """One process, all three MCP servers, one origin — see mcp_servers/app.py.
+
+    MCP_SHARED_SECRET makes the origin itself check every request, not just
+    the proxy in front of it — see RequireSharedSecret in mcp_servers/app.py
+    for why that gap is real, not theoretical, once the tunnel is public.
+    """
+    env = os.environ.copy()
+    env["MCP_SHARED_SECRET"] = shared_secret
     _spawn(
         [sys.executable, "-m", "mcp_servers.app"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=env,
     )
     for name, path in MCP_PATHS.items():
         print(f"  {name} at 127.0.0.1:{BUNDLE_PORT}{path}")
@@ -186,14 +196,22 @@ def start_tunnel(cf, port, out, timeout=60):
     out[port] = None
 
 
-def register(servers):
+def register(servers, shared_secret):
+    """Registers each server with api_key auth, not "none". Verified live
+    (see the session's MCP-origin-auth probe) that ArmorIQ's proxy forwards
+    this credential to the origin as a real X-API-Key header on every
+    invoke() — so this is the same demo path, just no longer also reachable
+    by anyone who has the tunnel URL and skips the proxy.
+    """
     payload = {
         "version": "v1",
         "identity": {"api_key": ARMORIQ_API_KEY, "user_id": AGENT_EMAIL, "agent_id": AGENT_ID},
         "environment": "production",
         "proxy": {"url": PROXY_URL, "timeout": 30, "max_retries": 3},
         "mcp_servers": [
-            {"id": s["id"], "url": s["url"], "auth": "none"} for s in servers.values()
+            {"id": s["id"], "url": s["url"],
+             "auth": {"type": "api_key", "api_key": shared_secret}}
+            for s in servers.values()
         ],
         "policy": {
             "allow": [
@@ -233,8 +251,10 @@ def bring_up(log=print):
 
     cf = ensure_cloudflared()
 
+    shared_secret = secrets.token_urlsafe(32)
+
     log("starting MCP servers...")
-    start_servers()
+    start_servers(shared_secret)
     time.sleep(3)
 
     log("opening tunnel (this takes ~10s)...")
@@ -252,13 +272,24 @@ def bring_up(log=print):
     }
 
     log("registering with ArmorIQ...")
-    result = register(servers)
+    result = register(servers, shared_secret)
     if not result.get("success"):
         raise RuntimeError(f"registration failed: {result}")
 
+    # NOT set here: agent.infra and agent.main are always separate processes
+    # (a second terminal, or a subprocess the panel spawns), so an env var set
+    # in this process would never reach the one that actually calls invoke().
+    # The secret travels via .session.json instead; agent/main.py applies it
+    # to its own process's env at the same point it already reads that file.
+
     SESSION_FILE.write_text(
         json.dumps(
-            {"created_at": datetime.now(timezone.utc).isoformat(), "servers": servers}, indent=2
+            {
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "servers": servers,
+                "mcp_shared_secret": shared_secret,
+            },
+            indent=2,
         ),
         encoding="utf-8",
     )

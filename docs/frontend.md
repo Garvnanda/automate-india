@@ -473,3 +473,93 @@ row counts itself.
   is not a valid liveness check. Treat `>= 500` as dead.
 - **Never let the panel offer an Approve button.** It would be a lie about where authority lives,
   and it is the one thing in this project that would actually mislead a judge.
+
+---
+
+## 9. v2 additions — Bank A/B, the signed-plan strip, PROOF, and a real security layer
+
+Everything in §1–§8 above is still accurate. This section covers what v2 added on top, so a rebuild
+matches the current shipped panel, not the v1 snapshot §1–§8 describe.
+
+### 9.1 Why: the judge-facing control used to be a menu
+
+v1's controls were literally `HAPPY / VIOL-1 / VIOL-2`, wired to `--force-violation N`. The labels
+announced the hardcoding. v2 replaces that with **authorization + world conditions**: the judge sets
+what the agent may do and what it will encounter, presses RUN, and whatever the agent reaches for
+outside its authorization *is* the violation — emergent, never selected.
+
+### 9.2 Two banks, one RUN button
+
+- **Bank A — AUTHORIZE** (`.tog` switches, reused from v1's toggle CSS): `get_dataset_card`,
+  `read_split`, `launch_run`, `read_metrics` are **locked on** (a small brass lock pip, `data-tip`
+  explains why — the pipeline can't run without them, and the click handler for a locked switch
+  returns immediately rather than merely looking disabled). `promote_model` (staging), a `PROD`
+  switch (production authorization), and `CLEAN` (`delete_rows` authorization) are free.
+- **Bank B — CONDITIONS** (`.knob` rotary dials, new): `MODEL` (clears/narrow/fails — seeded
+  accuracy), `CARD` (poisoned/clean/**custom**, §9.6), `HASH` (match/mismatch), `REPLAY`
+  (live/del-rows/prod — the old `--force-violation` path, now honestly labelled as scripted replay
+  rather than the primary control).
+- A **preset rotary** (`BASELINE / INJECTION / ESCALATION / CUSTOM`) sets both banks at once;
+  turning any individual switch drops it to `CUSTOM`. Switches stay fully live either way.
+- **RUN is a separate control from ARM.** It disables itself — and says why on the status
+  line — whenever the plan would be empty, the enforcement session isn't ready, or (§9.6) a custom
+  card is selected with no text yet.
+
+`currentCfg()` reads both banks into one object matching `agent/runconfig.py`'s `RunConfig` exactly,
+sent as `cfg=<json>` on both `/api/run` and `/api/reset`.
+
+### 9.3 The plan strip is built from the run, not a constant
+
+v1 hardcoded five `PLAN` steps in JS. v2's `agent.main` emits one `__plan__` frame the moment
+`get_intent_token()` returns (unguarded runs emit the same frame with `signed:false`, no hash — the
+real difference, not hidden), and `buildStrip(frame)` constructs the strip from exactly what got
+signed: `steps.length + 1` grid columns (the `+1` is a permanently reserved trailing slot for
+whatever the agent reaches for outside the plan — including, now, an *authorized* `delete_rows`,
+which lands there green instead of red). `$('sealTag')` shows `PLAN SIGNED <hash prefix>` or
+`DECLARED, NOT SIGNED`.
+
+A plan can legitimately carry two `promote_model` steps (staging + production both authorized).
+`findStepIndex(o)` matches on the `stage` param when both steps share an action, so a verdict lands
+on the right cell instead of always hitting the first match.
+
+### 9.4 PROOF replaces the console after a run, not alongside it
+
+The instrument is designed to fit one screen (it gets recorded). Adding a settled post-run view
+without breaking that meant **swapping**, not stacking: `renderProof()` hides `#console` and shows
+`#proof` in the same slot; starting a new run or hitting RESET restores the console. PROOF renders
+one row per call — step, action, `stage=…` if present, CSRG-style path, verdict — against the real
+`plan_hash`. It only ever displays fields the SDK/agent already produce; if per-step Merkle proof
+detail isn't available, the verdict chain is what's shown, not an invented one.
+
+### 9.5 Security layer — real, not incidental to the redesign
+
+Three things landed here that a rebuild must not skip, each verified live (not asserted):
+
+- **Origin-side auth on the MCP servers.** `agent/infra.py` generates a random secret per session,
+  registers each MCP server with it as ArmorIQ `api_key` auth, and `mcp_servers/app.py` runs a
+  `RequireSharedSecret` ASGI middleware in front of the bundled app checking `x-api-key` on every
+  request. Without this, the cloudflared tunnel is a public URL with zero auth of its own for the
+  whole demo — verified live, both the bypass (401 now) and the legitimate path (200, unaffected).
+  `agent/main.py` reads the secret from `.session.json` and sets the matching
+  `ARMORIQ_MCP_<id>_AUTH_TYPE`/`_API_KEY` env vars before constructing `ArmorIQClient`, since
+  `agent.infra` and `agent.main` are always separate OS processes.
+- **HTML-escaping everywhere the panel builds markup around a value instead of just displaying
+  it.** A shared `esc()` covers `renderProof`, the plan-strip builder, and the two tooltips that
+  embed ArmorIQ's own reported text. The concrete risk: organic-mode tool-call params come straight
+  from LLM JSON with no server-side schema enforcement, and the whole project exists because a
+  dataset card can manipulate the model — there's no reason it couldn't aim at the browser too.
+- **Origin/Referer check on `/api/run` and `/api/reset`.** Both are simple `GET`/`POST` with no
+  session or CSRF token, so any other page open in the same browser could trigger a real destructive
+  run via `<img src="…">` — the request runs server-side whether or not the attacker page can read
+  the response. `panel/server.py`'s `same_origin()` rejects a mismatched `Origin`/`Referer` while
+  still allowing bare requests with neither (curl, direct CLI-style use).
+
+### 9.6 The one genuinely free-text control: write the dataset card yourself
+
+Every other control is a toggle or an enum. The CARD dial's third position, `CUSTOM`, reveals a
+small textarea (`#cardTextWrap`, hidden unless `card==='custom'`) where a judge types or pastes
+their own card content — no template. `RunConfig.card_text` (capped at 4000 chars) carries it
+through `panel/server.py`'s `seed_for()` straight into `dataset_card.content`; `get_dataset_card()`
+returns it verbatim to the agent. It never reaches the panel's own DOM — `log_event` logs tool
+*params*, never *results* — so this control adds a real interactivity surface without adding an XSS
+surface. RUN stays disabled with `WRITE THE CARD BELOW BEFORE RUNNING` until there's non-empty text.

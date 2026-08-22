@@ -1,10 +1,11 @@
 """Demo panel backend. Stdlib only — no framework, matching the project's
 constraint on the frontend too.
 
-Serves panel/index.html and three endpoints the page calls:
+Serves panel/index.html and four endpoints the page calls:
   GET  /api/state            current DB state (val row count, promotions)
   POST /api/reset            runs data/reset.py, returns new state
   GET  /api/run?mode=...     runs agent.main, streams its stdout as SSE
+  POST /api/ask              free-text Q&A grounded in one real run's log (agent/ask.py)
 
 The panel never fakes anything: every trace pulse, lamp, and gauge move is
 driven by a real line agent.main printed, in real time. Guarded runs need
@@ -25,6 +26,7 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from agent import ask as ask_mod  # noqa: E402
 from agent import infra  # noqa: E402
 from agent.config import DATASET_DB_PATH, EVAL_SPLIT, REGISTRY_DB_PATH, SESSION_FILE  # noqa: E402
 from agent.runconfig import RunConfig  # noqa: E402
@@ -44,10 +46,28 @@ def cfg_from_query(query):
 
 
 def seed_for(cfg):
-    return seed(card=cfg.card, model_result=cfg.model_result, hash_match=cfg.hash_match)
+    return seed(card=cfg.card, model_result=cfg.model_result, hash_match=cfg.hash_match,
+                card_text=cfg.card_text)
 
 PORT = 8080
 PY = sys.executable
+OWN_ORIGIN = f"http://127.0.0.1:{PORT}"
+
+
+def same_origin(handler):
+    """/api/run is a plain GET so EventSource can use it, and GET requests
+    from other tabs execute server-side regardless of whether the attacker
+    page can read the response — the classic localhost-CSRF shape. A page on
+    any other origin open in the same browser could embed
+    <img src="http://127.0.0.1:8080/api/run?mode=guarded&..."> and silently
+    trigger a real destructive run. Browsers still send Origin/Referer on
+    cross-origin requests (just not the full path), so reject anything that
+    doesn't claim to come from this page. Same-origin XHR/fetch/EventSource
+    calls always carry one of these; curl/direct requests carry neither and
+    are allowed, matching how the CLI (agent.main) itself has no such gate.
+    """
+    origin = handler.headers.get("Origin") or handler.headers.get("Referer") or ""
+    return not origin or origin.startswith(OWN_ORIGIN)
 
 # Guarded runs need the MCP servers tunneled and registered. The panel brings
 # that up itself in a background thread so the whole demo is one command; the
@@ -151,6 +171,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(current_state())
 
         if parsed.path == "/api/run":
+            if not same_origin(self):
+                return self._json({"error": "cross-origin request refused"}, status=403)
             return self._run(parse_qs(parsed.query))
 
         self.send_response(404)
@@ -159,12 +181,33 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/reset":
+            if not same_origin(self):
+                return self._json({"error": "cross-origin request refused"}, status=403)
             try:
                 cfg = cfg_from_query(parse_qs(parsed.query))
             except (ValueError, TypeError) as e:
                 return self._json({"error": str(e)}, status=400)
             n = seed_for(cfg)
             return self._json({"seeded": n, **current_state()})
+
+        if parsed.path == "/api/ask":
+            if not same_origin(self):
+                return self._json({"error": "cross-origin request refused"}, status=403)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except (ValueError, json.JSONDecodeError):
+                return self._json({"error": "malformed request body"}, status=400)
+            try:
+                answer = ask_mod.ask(payload.get("run_id"), payload.get("question"))
+            except ValueError as e:
+                return self._json({"error": str(e)}, status=400)
+            except FileNotFoundError as e:
+                return self._json({"error": str(e)}, status=404)
+            except RuntimeError as e:
+                return self._json({"error": str(e)}, status=502)
+            return self._json({"answer": answer})
+
         self.send_response(404)
         self.end_headers()
 
