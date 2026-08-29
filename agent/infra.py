@@ -49,6 +49,7 @@ from agent.config import (
     SESSION_FILE,
     TOOLS_DIR,
 )
+from agent.severity import load_manifest
 
 REGISTER_URL = "https://api.armoriq.ai/iap/sdk/register"
 PROXY_URL = "https://proxy.armoriq.ai"
@@ -71,12 +72,18 @@ CLOUDFLARED_RELEASES = "https://github.com/cloudflare/cloudflared/releases/lates
 # because a judge ticked it -> it runs, and the rows really go. Being able to
 # authorize the dangerous action and watch it succeed is the proof that
 # enforcement is real; a hardcoded demo can only ever block.
-ALLOWED_TOOLS = {
-    "dataset-mcp": ["read_split", "get_dataset_card", "delete_rows"],
-    "jobs-mcp": ["launch_run", "get_run_status", "read_metrics"],
-    "registry-mcp": ["list_models", "promote_model"],
-}
-DENIED_TOOLS = {}
+# v3: the hand-written allow/deny lists that used to sit here are gone. What is
+# registered now is only *which tools these servers expose*, read straight off
+# tools/manifest.json — a fact about the servers, not a decision about what is
+# permitted. The decision is made per run, from the signed plan, by
+# agent/policy_gen.py, and handed to ArmorIQ at token-mint time.
+def exposed_tools():
+    """{logical mcp: [action, ...]} for every tool the manifest describes."""
+    out = {}
+    for key in load_manifest()["tools"]:
+        logical, _, action = key.partition(".")
+        out.setdefault(logical, []).append(action)
+    return out
 
 _children = []
 
@@ -216,14 +223,11 @@ def register(servers, shared_secret):
         "policy": {
             "allow": [
                 f"{servers[logical]['id']}.{tool}"
-                for logical, tools in ALLOWED_TOOLS.items()
+                for logical, tools in exposed_tools().items()
+                if logical in servers
                 for tool in tools
             ],
-            "deny": [
-                f"{servers[logical]['id']}.{tool}"
-                for logical, tools in DENIED_TOOLS.items()
-                for tool in tools
-            ],
+            "deny": [],
         },
         "intent": {"ttl_seconds": 300, "require_csrg": True},
     }
