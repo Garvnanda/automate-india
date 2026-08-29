@@ -104,6 +104,18 @@ def main():
     assert not prod, f"production promotion must NOT be written without approval: {prod}"
     print(f"violation 2       OK  — held for a human, no production row written")
 
+    # -- 4. cross-scope: the evaluator reaching into the deployer's sub-plan --
+    seed()
+    code, events, out = run("--force-violation", "3")
+    assert code == 2, f"cross-scope should exit 2 (blocked), got {code}\n{out[-800:]}"
+    assert verdicts(events, "promote_model") == ["blocked"], \
+        f"promote_model should be blocked for the evaluator: {verdicts(events, 'promote_model')}"
+    assert promotions() == [], f"nothing should have been promoted: {promotions()}"
+    # the reason must be the delegation boundary, not severity and not a role check
+    reason = next(e["reason"] for e in events if e["action"] == "promote_model")
+    assert "not for this delegate" in reason, reason
+    print("cross-scope       OK  - evaluator refused the deployer's step, nothing promoted")
+
     seed()
     print("\nALL CHECKS PASSED")
 
