@@ -503,6 +503,52 @@ body{
 .vcard.ok .hdr{color:var(--green);} .vcard.warn .hdr{color:var(--amber);} .vcard.err .hdr{color:var(--red);}
 .vcard.hard{border-color:rgba(255,47,107,.5);} .vcard.hard .hdr{color:#ff2f6b;}
 
+/* ── v3 Phase 3: the plan graph — additive alongside the strip, same data,
+   positions frozen at sign time, no reflow, no physics ── */
+.graphwrap{
+  border-radius:9px; padding:8px 4px; overflow-x:auto;
+  background:linear-gradient(178deg,#1c1814,#111010);
+  box-shadow:inset 0 1px 0 rgba(255,235,205,.05), inset 0 -2px 4px rgba(0,0,0,.6), 0 1px 0 rgba(255,235,205,.03);
+}
+.graphwrap svg{display:block; height:130px; min-width:100%;}
+.gedge{stroke:rgba(255,238,214,.14); stroke-width:1.4; fill:none;}
+.gedge.res{stroke:rgba(201,162,39,.55); stroke-width:1.3;}
+.gedge.dashed{stroke-dasharray:3 3; stroke:rgba(226,65,44,.4);}
+.gedge-label{font-family:var(--mono); font-size:7px; fill:#8a7c53; text-anchor:middle;}
+.gnode .gbox{fill:#151210; stroke:rgba(255,235,205,.12); stroke-width:1.2; transition:fill .2s, stroke .2s;}
+.gnode .gbox.evid{stroke:rgba(242,168,29,.5); stroke-dasharray:2 2;}
+.gnode .glabel{font-family:var(--mono); font-size:9px; fill:#c9bd9e; text-anchor:middle;}
+.gnode .gsub{font-family:var(--mono); font-size:7px; fill:#655c50; text-anchor:middle; letter-spacing:.06em;}
+.gnode.intruder .gbox{opacity:.35;}
+.gnode.run .gbox{fill:#241d13; stroke:#e8c463;} .gnode.run .glabel{fill:var(--ink);}
+.gnode.done .gbox{fill:#122016; stroke:var(--green);} .gnode.done .glabel{fill:var(--ink);}
+.gnode.held .gbox{fill:#221a0c; stroke:var(--amber);} .gnode.held .glabel{fill:var(--amber);}
+.gnode.bad .gbox{fill:#22110d; stroke:var(--red);} .gnode.bad .glabel{fill:var(--red);}
+.gnode.hard .gbox{stroke:#ff2f6b; stroke-width:1.8;} .gnode.hard .gsub{fill:#ff2f6b;}
+.gnode.scopebreach .gbox{stroke:#ff2f6b;} .gnode.scopebreach .gsub{fill:#ff2f6b;}
+.gnode.noted .gbox{fill:#122016; stroke:var(--green); opacity:.65;}
+
+/* ── v3 Phase 2: live plan preview — clearly DEV, never shares the real
+   run's strip/graph so a mock recompute can never be mistaken for a real
+   signature ── */
+.preview{
+  flex:1; min-width:260px; border-radius:8px; padding:8px 12px;
+  background:linear-gradient(178deg,#1c1814,#111010);
+  box-shadow:inset 0 1px 0 rgba(255,235,205,.05), inset 0 -2px 4px rgba(0,0,0,.6), 0 0 0 1px rgba(201,162,39,.18);
+}
+.preview-hdr{
+  display:flex; align-items:baseline; gap:8px; font-family:var(--mono); font-size:8px;
+  letter-spacing:.14em; color:var(--brass); margin-bottom:6px;
+}
+.preview-flag{color:#8a7c53; font-size:7px; letter-spacing:.1em;}
+.preview-steps{display:flex; flex-wrap:wrap; gap:5px; margin-bottom:6px;}
+.pchip{
+  font-family:var(--mono); font-size:8px; letter-spacing:.04em; color:#8d8271;
+  background:#08070650; border:1px solid rgba(0,0,0,.5); border-radius:10px; padding:3px 8px;
+}
+.pchip.hold{color:var(--amber); border-color:rgba(242,168,29,.4);}
+.preview-hash{font-family:var(--mono); font-size:8px; color:#655c50; letter-spacing:.05em;}
+
 .cardtext{
   display:none; margin-top:8px; padding:10px 12px; border-radius:8px; flex:1 1 260px; min-width:220px;
   background:linear-gradient(178deg,#1c1814,#111010);
@@ -846,6 +892,7 @@ body{
 
   <div class="policy" id="policyPanel" data-tip="policy"></div>
   <div class="vcard" id="vcard"></div>
+  <div class="graphwrap" id="graphWrap" data-tip="graph"><svg id="planGraphSvg"></svg></div>
 
   <div class="bay">
     <div class="cell cellA" id="cellA" data-tip="cellA">
@@ -909,6 +956,22 @@ body{
           <div>MODEL <span class="h" id="modelTag">cand-v7-8f3a2b</span> &middot; <span id="sealTag">PLAN NOT SIGNED</span></div>
           <div id="statusLine">STANDBY &mdash; SET AUTHORITY, THEN RUN</div>
         </div>
+      </div>
+    </div>
+
+    <div class="ctlrow">
+      <div class="bank">
+        <div class="banklabel" data-tip="rolebank">AGENT ROLE &mdash; DRIVES WHETHER PRODUCTION HOLDS</div>
+        <div class="switches">
+          <button class="knob" id="roleKnob" data-tip="role">
+            <span class="dial"></span><span class="cap">ROLE</span><span class="val">OPERATOR</span>
+          </button>
+        </div>
+      </div>
+      <div class="preview" id="previewCard" data-tip="preview">
+        <div class="preview-hdr"><span>PLAN PREVIEW</span><span class="preview-flag">DEV &middot; RECOMPUTED LIVE, NOT SIGNED</span></div>
+        <div class="preview-steps" id="previewSteps"></div>
+        <div class="preview-hash" id="previewHash"></div>
       </div>
     </div>
   </div>
@@ -1168,6 +1231,7 @@ body{
     el.modeToggle.disabled = !on;
     el.reset.disabled = !on;
     $('preset').disabled = !on;
+    $('roleKnob').disabled = !on;
     document.querySelectorAll('#bankA .tog, #bankB .knob').forEach(b => b.disabled = !on);
     cardTextEl.disabled = !on;
     $('runBtn').classList.toggle('running', !on);
@@ -1234,6 +1298,7 @@ body{
   function resetPSteps(){
     psteps.innerHTML = ''; stepEls = []; planSteps = []; intruderEl = null;
     $('sealTag').textContent = 'PLAN NOT SIGNED';
+    $('planGraphSvg').innerHTML = '';
   }
   /* the agent only logs a step once it has a verdict — there is no "starting"
      event — so the step after a finished one is what is in flight */
@@ -1341,7 +1406,7 @@ body{
       if (running || spec.locked) return;
       switchState[spec.key] = !switchState[spec.key];
       b.setAttribute('aria-pressed', String(switchState[spec.key]));
-      toCustom(); refreshArm();
+      toCustom(); refreshArm(); previewPlan();
     });
     $('bankADyn').appendChild(b);
     return b;
@@ -1383,7 +1448,7 @@ body{
     $('cardTextCnt').textContent = '0 / 4000';
     syncCardTextVisibility();
     bankBEls.forEach(b => b._paint());
-    refreshArm();
+    refreshArm(); previewPlan();
   }
   function toCustom(){
     presetIdx = 3;
@@ -1419,6 +1484,59 @@ body{
     if (empty) say('NOTHING AUTHORIZED — THE PLAN WOULD BE EMPTY');
     else if (needsCardText) say('WRITE THE CARD BELOW BEFORE RUNNING');
     else if (!running) say('READY — ' + (cfg.authorized.length + (cfg.promote_production ? 1 : 0)) + ' STEPS TO SIGN');
+  }
+
+  /* ───────── v3 Phase 2: agent role + live plan preview ─────────
+     A separate, clearly-labelled DEV surface — never shares the real run's
+     plan strip/graph, so a locally-recomputed preview hash can never be
+     mistaken for ArmorIQ's real signature. Updates on every AUTHORIZE
+     switch / role change, before RUN is ever pressed. */
+  const ROLES = ['reader', 'operator', 'release_manager'];
+  let roleState = 'operator';
+  const roleKnobEl = $('roleKnob');
+  function paintRoleKnob(){
+    const i = ROLES.indexOf(roleState);
+    roleKnobEl.querySelector('.val').textContent = roleState.toUpperCase();
+    roleKnobEl.querySelector('.dial').style.transform = `rotate(${i * 150 - 150}deg)`;
+  }
+  roleKnobEl.addEventListener('click', () => {
+    if (running) return;
+    roleState = ROLES[(ROLES.indexOf(roleState) + 1) % ROLES.length];
+    paintRoleKnob(); previewPlan();
+  });
+  paintRoleKnob();
+
+  function renderPreview(frame){
+    const box = $('previewSteps');
+    box.innerHTML = '';
+    (frame.steps || []).forEach(st => {
+      const c = document.createElement('span');
+      c.className = 'pchip' + (st.authority_delta > 0 ? ' hold' : '');
+      const label = st.args && st.args.stage ? `${st.action}:${st.args.stage}` : st.action;
+      c.textContent = `${label} · ${st.required_role}`;
+      box.appendChild(c);
+    });
+    const holds = (frame.steps || []).filter(s => s.authority_delta > 0);
+    $('previewHash').textContent = frame.steps.length
+      ? `hash ${frame.plan_hash} · ${frame.steps.length} steps` +
+        (holds.length ? ` · would HOLD: ${holds.map(s => s.action).join(', ')} (role ${frame.agent_role} short of it)` : ' · no hold at this role')
+      : 'nothing authorized — the draft plan is empty';
+  }
+  let previewTimer = null;
+  function previewPlan(){
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      const cfg = currentCfg();
+      try {
+        const r = await fetch('/api/plan/preview', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ authorized:cfg.authorized, promote_production:cfg.promote_production, agent_role:roleState }),
+        });
+        const frame = await r.json();
+        if (frame.error){ $('previewHash').textContent = frame.error; $('previewSteps').innerHTML = ''; return; }
+        renderPreview(frame);
+      } catch (e) { /* server not up yet */ }
+    }, 150);
   }
 
   /* ───────── PROOF — what the run can prove afterwards ─────────
@@ -1704,6 +1822,19 @@ body{
     policy: `<b>GENERATED POLICY</b>Walked from the signed plan, the tool manifest, and the agent's role
       at the moment of signing — not written before this run. Change the plan, not this text, and the
       policy changes with it.`,
+    rolebank: `<b>AGENT ROLE</b>What role the agent is granted for this run — reader, operator, or
+      release_manager. A production promotion needs release_manager; anything less and it holds for a
+      higher-ranked human instead of executing.`,
+    role: () => `<b>ROLE · ${roleState.toUpperCase()}</b>Changes which calls the plan preview below
+      marks as "would hold." Grant release_manager and a pre-authorized production promotion needs no
+      approval at all — same manifest, same call, no hold. That's closer A.`,
+    preview: `<b>PLAN PREVIEW · DEV ONLY</b>Recomputed locally every time a switch or the role knob
+      moves — <i>not</i> ArmorIQ's real signature, and never shown on the same strip a real run uses.
+      Shows what the draft plan would sign as right now: its hash, every step's required role, and
+      which calls would hold at the current role grant.`,
+    graph: `<b>PLAN GRAPH</b>Same steps as the strip above, laid out left to right with their real
+      resource dependencies drawn in brass. A dashed amber ring means the step touches the evidence
+      the run is graded on. The trailing dashed slot is where anything outside the plan lands.`,
     guardbank: `<b>ENFORCEMENT</b>The one switch that changes whether any of this is checked. Same
       agent, same prompt, same tools either way.`,
     guard: () => guardedMode
@@ -1868,6 +1999,75 @@ body{
       plan_hash: frame.plan_hash,
     });
     renderPolicy(frame);
+    renderGraph(frame);
+  }
+
+  /* ───────── v3 Phase 3: the plan graph ─────────
+     Nodes and edges come entirely from the frame — never recomputed here.
+     Positions are index-based and fixed at sign time; only node class/text
+     change afterward, as verdicts land, same data routeVerdictV3 already
+     routes to the strip. */
+  const GNS = 'http://www.w3.org/2000/svg';
+  const gEl = (tag, attrs) => {
+    const e = document.createElementNS(GNS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  };
+  function renderGraph(frame){
+    const svg = $('planGraphSvg');
+    svg.innerHTML = '';
+    const steps = frame.steps || [];
+    const nodeW = 118, nodeH = 46, gap = 26, x0 = 16, y0 = 46;
+    const cx = i => x0 + i * (nodeW + gap);
+    const width = x0 * 2 + (steps.length + 1) * (nodeW + gap);
+    svg.setAttribute('viewBox', `0 0 ${width} 130`);
+
+    const evid = new Set(frame.evidence_base || []);
+
+    // order-only connectors — always drawn, thin, no data claim
+    for (let i = 0; i < steps.length - 1; i++){
+      svg.appendChild(gEl('line', { class:'gedge seq', x1:cx(i) + nodeW, y1:y0 + nodeH / 2, x2:cx(i + 1), y2:y0 + nodeH / 2 }));
+    }
+    // real resource edges from the frame — the only ones that assert a dependency
+    (frame.edges || []).forEach(e => {
+      const x1 = cx(e.from) + nodeW / 2, x2 = cx(e.to) + nodeW / 2, y = y0 - 16;
+      svg.appendChild(gEl('path', { class:'gedge res', d:`M${x1},${y0} C${x1},${y} ${x2},${y} ${x2},${y0}` }));
+      const label = gEl('text', { class:'gedge-label', x:(x1 + x2) / 2, y:y - 3 });
+      label.textContent = e.resource;
+      svg.appendChild(label);
+    });
+    steps.forEach((st, i) => {
+      const touchesEvidence = (st.reads || []).concat(st.writes || []).some(r => evid.has(r));
+      const g = gEl('g', { class:'gnode', id:`gnode-${i}` });
+      g.appendChild(gEl('rect', { class:'gbox' + (touchesEvidence ? ' evid' : ''), x:cx(i), y:y0, width:nodeW, height:nodeH, rx:8 }));
+      const label = gEl('text', { class:'glabel', x:cx(i) + nodeW / 2, y:y0 + nodeH / 2 - 3 });
+      label.textContent = st.args && st.args.stage ? `${st.action}:${st.args.stage}` : st.action;
+      const sub = gEl('text', { class:'gsub', x:cx(i) + nodeW / 2, y:y0 + nodeH / 2 + 13 });
+      sub.textContent = st.required_role || '';
+      g.appendChild(label); g.appendChild(sub);
+      svg.appendChild(g);
+    });
+    // trailing out-of-plan slot, dashed, dim until something reaches for it
+    const ix = cx(steps.length) + 10;
+    svg.appendChild(gEl('line', { class:'gedge seq dashed', x1:cx(steps.length - 1) + nodeW, y1:y0 + nodeH / 2, x2:ix, y2:y0 + nodeH / 2 }));
+    const ig = gEl('g', { class:'gnode intruder', id:'gnode-intruder' });
+    ig.appendChild(gEl('rect', { class:'gbox', x:ix, y:y0, width:nodeW, height:nodeH, rx:8 }));
+    const il = gEl('text', { class:'glabel', x:ix + nodeW / 2, y:y0 + nodeH / 2 - 3 }); il.textContent = '—';
+    const is_ = gEl('text', { class:'gsub', x:ix + nodeW / 2, y:y0 + nodeH / 2 + 13 }); is_.textContent = 'outside the plan';
+    ig.appendChild(il); ig.appendChild(is_);
+    svg.appendChild(ig);
+  }
+  function paintGraphNode(id, o, keepIntruder){
+    const g = document.getElementById(id);
+    if (!g) return;
+    // V3_CLASS already carries the extra token (e.g. "bad hard") the CSS
+    // above keys the hard/scopebreach/noted look off — same taxonomy as the
+    // strip, no separate mapping to keep in sync.
+    g.setAttribute('class', 'gnode ' + (keepIntruder ? 'intruder ' : '') + (V3_CLASS[o.verdict] || 'bad'));
+    const label = g.querySelector('.glabel');
+    if (label) label.textContent = o.args && o.args.stage ? `${o.action}:${o.args.stage}` : o.action;
+    const sub = g.querySelector('.gsub');
+    if (sub) sub.textContent = v3HardTag(o) || o.verdict.toLowerCase();
   }
   function renderPolicy(frame){
     const pp = $('policyPanel');
@@ -1896,12 +2096,14 @@ body{
   function routeVerdictV3(o){
     if (o.step_index !== null && o.step_index !== undefined && stepEls[o.step_index]){
       paintStepV3(stepEls[o.step_index], o);
+      paintGraphNode(`gnode-${o.step_index}`, o);
       return;
     }
     if (!intruderEl) return;
     intruderEl.dataset.state = o.verdict; intruderEl.dataset.action = o.action;
     paintStepV3(intruderEl, o);
     intruderEl.className += ' intruder on';
+    paintGraphNode('gnode-intruder', o, true);
   }
   function renderVerdictCard(o){
     const vc = $('vcard');
@@ -1960,6 +2162,8 @@ body{
       if (obj.step_index !== null && obj.step_index !== undefined && stepEls[obj.step_index]){
         stepEls[obj.step_index].className = 'pstep done';
         advanceP(obj.step_index);
+        const g = document.getElementById(`gnode-${obj.step_index}`);
+        if (g) g.setAttribute('class', 'gnode done');
       }
       log(obj.result_summary || `step ${obj.status}`, 'ok');
       return;

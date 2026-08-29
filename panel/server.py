@@ -32,6 +32,7 @@ from agent import infra  # noqa: E402
 from agent.config import DATASET_DB_PATH, EVAL_SPLIT, REGISTRY_DB_PATH, SESSION_FILE  # noqa: E402
 from agent.runconfig import RunConfig  # noqa: E402
 from data.seed import seed  # noqa: E402
+from panel import plan_preview  # noqa: E402
 
 
 def cfg_from_query(query):
@@ -197,6 +198,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, status=400)
             n = seed_for(cfg)
             return self._json({"seeded": n, **current_state()})
+
+        if parsed.path == "/api/plan/preview":
+            if not same_origin(self):
+                return self._json({"error": "cross-origin request refused"}, status=403)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                frame = plan_preview.build_plan_frame(
+                    body.get("authorized") or [], bool(body.get("promote_production")),
+                    body.get("agent_role") or "operator")
+            except (ValueError, TypeError, KeyError) as e:
+                return self._json({"error": f"bad draft plan — {e}"}, status=400)
+            return self._json(frame)
 
         self.send_response(404)
         self.end_headers()
