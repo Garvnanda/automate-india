@@ -854,3 +854,90 @@ disabled — real bug was two layers deeper, found by testing with curl against 
         render plain, `done` renders green, no false errors.
 - [x] Cleaned up all stray processes and stale session state as part of this fix; current panel
       server instance is the only one running, `.session.json` reflects its real, live registration.
+
+## v3 Phase 0 — delegate() verification: FAILED, Phase 5 struck
+Blocking gate from `docs/implementation-HA.md` §2, run live against the real platform before any
+v3 code was written.
+
+- [x] **`client.delegate_subtree()` is real and works** (SDK 0.6.2, `client.py:1144`; the older
+      `delegate()` is marked legacy in its own source). Returns a real `trust_id`, `subtree_root`,
+      a 5-element Merkle `inclusion_proof`, and a child token that auto-attaches
+      `X-CSRG-Subtree-Path/Root/Parent-Root` on every `invoke()`. Path format is `/steps/[N]`;
+      `/steps/0`, `steps[0]` and `/steps/[0:2]` all 500.
+- [x] **But the confinement is not enforced, verified both directions.** A delegate scoped to only
+      `/steps/[0]` (`get_dataset_card`) successfully called `promote_model` and landed a real
+      staging promotion. Mirrored: a delegate scoped to only `/steps/[4]` (`promote_model`)
+      successfully called `read_split`. Control proves enforcement is otherwise alive on the same
+      token — `delete_rows` raised `IntentMismatchException`. The delegated token carries the
+      **parent's full authority**; the subtree headers are accepted and ignored.
+- [x] **Consequence, applied immediately per the doc's own instruction:** Phase 5 (delegation /
+      `SCOPEBREACH`) deleted, written up in `CONTRACT.md` §5 so Garv never builds delegation rings,
+      its 3h reallocated. Whether to rebuild scope confinement in our own code is parked until the
+      severity gate is green — and if it ever ships it ships narrated as ours, because
+      `docs/v3.md` §6.3's "cryptographically derived authority" claim is not available.
+- [x] **Correction to this file:** the SDK version recorded above as `0.6.10` does not exist —
+      installed is `0.6.2` and PyPI's latest is `0.6.2`. Every conclusion in this section was
+      re-verified live against the installed source, so nothing depends on the wrong number.
+
+## v3 Phase A — CONTRACT.md
+- [x] `CONTRACT.md` written and committed (`2270b0f`, branch `v3`, tagged `v2-final` at `c0260e3`).
+      Frame shapes frozen, corrected against the real repo (`mcp_servers/` not `mcp/`, the existing
+      SSE `GET /api/run` not a new `POST /run`), Phase 5 struck with its evidence, ownership and the
+      one shared edge (`panel/server.py`) written down.
+- [x] **Additive rule adopted as structural, not discretionary:** every v3 frame is added, nothing
+      v2 emits is removed or reshaped, so today's panel keeps rendering through the whole of v3.
+      GN's own doc names "breaking a working panel at hour 19" as the failure that loses this.
+
+## v3 Phase B — severity engine, generated policy (the MVP)
+- [x] `tools/manifest.json` — all 8 tools, `reads`/`writes`/`inverse`/`authority`, no verdicts
+      anywhere. **Every reads/writes entry was read off the actual SQL in `mcp_servers/*.py`**, and
+      that caught a real error in the first draft: `launch_run` was given `reads: ["models","labels"]`
+      when it only ever reads `models`, which wrongly made it a reader of the evidence base.
+      **Deliberate deviation from `docs/v3.md` §2.2:** its example gives `promote_model` the inverse
+      `registry-mcp.demote_model`. No such tool exists in this surface, so the inverse is `null`.
+      Stating an inverse we do not have is the one kind of lie this file cannot afford.
+- [x] `agent/severity.py` — the three axes plus `plan_edges()` / `annotate_steps()` for the panel's
+      graph. A tool that writes nothing is `reversible` (nothing to undo); unknown tools fail closed.
+      `NOTED` implemented and defaulted off. Every verdict carries an ordered derivation in plain
+      English, each sentence naming the fact it came from — including *which signed step* read the
+      resource being written ("read by step 2 (read_split)"), computed, not templated.
+- [x] **Design fork found and resolved, because gate 4 could not otherwise pass.** `docs/v3.md`
+      §2.4's matrix routes `irreversible + in-scope` to HOLD *at any authority delta*, which makes
+      §8's closer A ("grant `release_manager`, production flows, no hold, manifest untouched")
+      impossible. Resolved where §2.3 points — authority delta decides — by adding one narrow rule:
+      when the *action* is in the signed plan and only an argument reached past what was authorized,
+      an agent that already holds the required role is not escalating. Evidence-tampering is
+      excluded, and an unplanned *action* is still never ALLOW whatever the role (asserted).
+- [x] `agent/policy_gen.py` — walks (plan x manifest x role) and emits the allow/deny/hold handed to
+      ArmorIQ at token-mint time, plus the text rendered at the signing beat. **The hand-written
+      `ALLOWED_TOOLS`/`DENIED_TOOLS` are deleted from `agent/infra.py`** in the same change;
+      registration now declares only *which tools the servers expose*, read off the manifest, which
+      is a fact rather than a decision.
+- [x] **Real bug found by reading the generated policy's own output during a live run, not by
+      testing in isolation:** signed plans carry session-scoped ids (`jobs-mcp-bf8180`) while the
+      manifest is keyed logically, so every planned step failed the "already in the plan?" test and
+      `launch_run` landed in **deny** and `promote_model` in **hold**. Harmless only because the
+      allow list won that round — had the proxy honoured the deny, `launch_run` would have died
+      mid-demo. Fixed with `_infer_server_map()` (the map is derived from the plan when not given)
+      and pinned by a regression assertion.
+- [x] `__plan__` frame extended per `CONTRACT.md` §2 — per-step `i`/`reads`/`writes`/`required_role`,
+      `goal`, `bindings`, `agent_role`, `edges`, `evidence_base`, `generated_policy`,
+      `planner_fallback`. Every v2 field still present. `__verdict__` frames now emitted per call.
+- [x] `agent/runconfig.py` — `agent_role` added (validated against the manifest's own role order).
+- [x] **Phase B gate: all four criteria PASSED live, in one session.**
+      1. Unguarded still destroys for real — `--unguarded --force-violation 1` → 100 -> 60 rows.
+      2. `delete_rows` mid-run → **`BLOCK_HARD`**, `approvable:false`, 5-line derivation naming
+         `labels` and step 2 by name, ArmorIQ still enforcing (real `IntentMismatchException`),
+         val split still exactly **100 rows**.
+      3. Production promotion → **`HOLD`**, `approvable:true`, `authority_delta: 1`, a real
+         delegation request raised on the platform; timeout path exits clean with `promotions` empty.
+      4. **Closer A proven:** the identical call with `agent_role=release_manager` → **`ALLOW`**,
+         `authority_delta: 0`, production promotion landed, no hold — **with zero edits to
+         `tools/manifest.json`**.
+- [x] `python -m agent.severity` and `python -m agent.policy_gen` are runnable self-checks
+      (assert-based, no framework). `tests/verify_guarded.py` still `ALL CHECKS PASSED` unchanged.
+- [ ] Full hold cycle under v3 (human approves on the dashboard -> `executed`) — the mechanism is
+      unchanged from v2 and the hold half is verified; the approval leg has not been re-run since
+      the severity rewrite.
+- [ ] Phase C (remaining frames: `__step__`/`__hold__`/`__resume__`/`__state__`), Phase D (planner),
+      Phase E (trace recorder) — not started.

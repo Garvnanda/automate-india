@@ -43,6 +43,7 @@ from agent.config import (
 from agent.logging import log_event
 from agent.plan import PLAN_GOAL, PLAN_STEPS, build_plan
 from agent.runconfig import RunConfig
+from agent.severity import annotate_steps, evidence_base, load_manifest, plan_edges
 from mcp_servers import dataset_mcp, jobs_mcp, registry_mcp
 
 MAX_ITERS = 10
@@ -127,20 +128,41 @@ def system_prompt(cfg):
     )
 
 
-def emit_plan_frame(plan, signed, token=None):
+def emit_frame(frame):
+    """One frame, one line of stdout. panel/server.py relays it verbatim."""
+    print(json.dumps(frame, default=str))
+
+
+def emit_plan_frame(plan, signed, token=None, agent_role="operator", generated_policy=None):
     """The signing beat. One frame, the moment the plan is fixed — for a
     guarded run that is the moment get_intent_token() returns, and the hash is
     real. Unguarded runs emit the same frame with signed=false and no hash,
     because there genuinely is no token; the panel shows that difference
-    rather than hiding it."""
+    rather than hiding it.
+
+    v3 adds the severity engine's own inputs — per-step reads/writes/required
+    role, the resource edges between steps, the evidence base, and the policy
+    generated from all three. Every v2 field is still here: the panel that
+    exists today keeps working against this frame unchanged (CONTRACT.md §0).
+    """
+    manifest = load_manifest()
     print(json.dumps({"__plan__": {
         "steps": [
-            {"action": st["action"], "mcp": st["mcp"], "params": st.get("params", {})}
-            for st in plan["steps"]
+            {"action": st["action"], "mcp": st["mcp"], "params": st.get("params", {}),
+             "i": ann["i"], "reads": ann["reads"], "writes": ann["writes"],
+             "required_role": ann["required_role"]}
+            for st, ann in zip(plan["steps"], annotate_steps(plan, manifest))
         ],
         "signed": bool(signed),
         "plan_hash": getattr(token, "plan_hash", None) if token else None,
         "token_id": getattr(token, "token_id", None) if token else None,
+        "goal": plan.get("goal"),
+        "bindings": {"dataset": EVAL_SPLIT, "model": CANDIDATE_HASH},
+        "agent_role": agent_role,
+        "edges": plan_edges(plan, manifest),
+        "evidence_base": sorted(evidence_base(plan, manifest)),
+        "generated_policy": generated_policy,
+        "planner_fallback": False,
     }}))
 
 
@@ -229,11 +251,13 @@ class GuardedExecutor:
         _apply_mcp_credentials(session)
         self.guard = ArmorGuard(
             run_id, build_plan(self.map, cfg), llm_name=OPENROUTER_MODEL,
-            hold_timeout=hold_timeout,
+            hold_timeout=hold_timeout, agent_role=cfg.agent_role, emit=emit_frame,
         )
         # logical mcp names for display; the signed plan itself carries session ids
         self.plan = build_plan(None, cfg)
-        emit_plan_frame(self.plan, signed=True, token=self.guard.token)
+        emit_plan_frame(self.plan, signed=True, token=self.guard.token,
+                        agent_role=cfg.agent_role,
+                        generated_policy=self.guard.generated_policy)
 
     @staticmethod
     def _unwrap(result):
