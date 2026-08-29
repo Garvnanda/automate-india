@@ -33,6 +33,7 @@ Two gates, and it matters which is which — do not blur them to look stronger:
     it.
 """
 
+import json
 import time
 
 from armoriq_sdk import ArmorIQClient
@@ -72,6 +73,7 @@ class ArmorGuard:
         self.hold_timeout = hold_timeout or DELEGATION_TIMEOUT_SECONDS
         self.emit = emit or (lambda frame: None)
         self._calls = 0
+        self._deviations = 0
         self.client = ArmorIQClient(user_id=AGENT_EMAIL, agent_id=AGENT_ID)
 
         # v3: the policy handed to ArmorIQ is derived from this plan, seconds
@@ -103,6 +105,7 @@ class ArmorGuard:
 
         if action not in self.planned_actions:
             verdict = self._judge(call_id, mcp, action, params, step_index)
+            self._deviations += 1
             if verdict["approvable"]:
                 # ponytail: an approved out-of-plan call still cannot execute —
                 # ArmorIQ refuses any action absent from the signed plan, and it
@@ -113,13 +116,28 @@ class ArmorGuard:
             return self._call_direct(mcp, action, params, step_index, call_id)
 
         escalation = self._escalation(action, params)
-        if escalation:
-            verdict = self._judge(call_id, mcp, action, params, step_index, reason=escalation)
-            if verdict["verdict"] != "ALLOW":
-                return self._call_with_delegation(
-                    mcp, action, params, step_index, escalation, call_id)
-            # the grant already covers these arguments — the plan was written
-            # narrower than the agent's authority, which is not an escalation
+        if not escalation:
+            # in the plan, with the arguments the plan authorized. The plan
+            # already said yes; severity never runs on it (docs/v3.md §3.4).
+            self.emit({
+                "type": "__verdict__", "call_id": call_id, "step_index": step_index,
+                "mcp": mcp, "action": action, "args": params, "in_plan": True,
+                "verdict": "ALLOW", "approvable": True,
+                "axes": {"reversibility": None, "blast_radius": "in-scope", "authority_delta": 0},
+                "derivation": [f"in signed plan (step {step_index}: {action})"],
+                "touches_evidence": [], "delegate": None,
+                "plan_hash": self.token.plan_hash, "delegation_hash": None,
+                "step_proof": self._step_proof(action),
+            })
+            return self._call_direct(mcp, action, params, step_index, call_id)
+
+        self._deviations += 1
+        verdict = self._judge(call_id, mcp, action, params, step_index, reason=escalation)
+        if verdict["verdict"] != "ALLOW":
+            return self._call_with_delegation(
+                mcp, action, params, step_index, escalation, call_id)
+        # the grant already covers these arguments — the plan was written
+        # narrower than the agent's authority, which is not an escalation
         return self._call_direct(mcp, action, params, step_index, call_id)
 
     def _judge(self, call_id, mcp, action, params, step_index, reason=None):
@@ -130,8 +148,23 @@ class ArmorGuard:
                            plan_hash=self.token.plan_hash, reason=reason,
                            step_index=step_index)
         verdict["call_id"] = call_id
-        self.emit({"__verdict__": verdict})
+        verdict["delegate"] = None
+        verdict["delegation_hash"] = None
+        verdict["step_proof"] = self._step_proof(action)
+        self.emit({"type": "__verdict__", **verdict})
         return verdict
+
+    def _step_proof(self, action):
+        """The Merkle step proof this call is checked against, when the token
+        carries one. Reported, never invented: absent means absent."""
+        for i, step in enumerate(self.plan.get("steps", [])):
+            if step.get("action") == action:
+                proofs = getattr(self.token, "step_proofs", None) or []
+                if i < len(proofs):
+                    proof = proofs[i]
+                    return proof if isinstance(proof, str) else json.dumps(proof, default=str)
+                return None
+        return None
 
     def _escalation(self, action, params):
         """Reason string if this call asks for authority the signed plan does
@@ -180,6 +213,10 @@ class ArmorGuard:
             )
         )
 
+        self.emit({"type": "__hold__", "call_id": call_id,
+                   "request_id": delegation.delegation_id,
+                   "dashboard_hint": "platform.armoriq.ai -> Intent -> Held Actions"})
+
         print()
         print("  ┌─ HELD — waiting on a human ────────────────────────────────")
         print(f"  │ {reason}")
@@ -207,6 +244,7 @@ class ArmorGuard:
             self.run_id, "guarded", step_index, action, mcp, params, "approved",
             f"approved by {APPROVER_EMAIL}",
         )
+        self.emit({"type": "__resume__", "call_id": call_id, "approved_by": APPROVER_EMAIL})
 
         result = self._call_direct(mcp, action, params, step_index)
         self.client.mark_delegation_executed(AGENT_EMAIL, delegation.delegation_id, self.token.plan_id)

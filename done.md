@@ -1066,6 +1066,76 @@ ship.
       correctly; connecting "preview state → which scenario RUN plays" is next, once HA's planner
       makes RUN-from-an-arbitrary-draft real rather than another heuristic to maintain.
 
+## v3 Phase C — the frame layer
+- [x] **Frame shape corrected against Garv's merged work before anything else.** He built
+      `handleVerdictV3` and `scripts/fake_stream.py` against **type-keyed** frames
+      (`{"type":"__verdict__"}`); Phase B emitted the nested `{"__verdict__":{...}}` shape, which his
+      handler silently ignores. Found by reading his merged code rather than by waiting for the panel
+      to look wrong. All frames are type-keyed now; `CONTRACT.md` §7.1 records it.
+- [x] `__verdict__` per call — including `ALLOW` for in-plan calls, so the panel can light steps as
+      they resolve. Severity itself still only runs on deviations (`docs/v3.md` §3.4 unchanged).
+- [x] `__step__` (with a `result_summary` read off the real result, not a template), `__state__`
+      after every write (counted from the real databases, never from what the agent believes it did),
+      `__hold__` / `__resume__` around the delegation cycle, `__END__` on every exit path.
+- [x] **Unguarded runs deliberately emit no `__verdict__` frames.** Nothing judged those calls, and
+      inventing a verdict for them would be the one dishonesty this panel does not do.
+- [x] **`__END__.outcome` fixed for honesty:** an unguarded run that deleted 40 rows was reporting
+      `outcome: "clean"`, because `_deviations` is a guarded-mode counter. Unguarded now reports
+      `unguarded` — "clean" is a claim about enforcement and an unguarded run may never make it.
+- [x] `merkle_root` reported as `null`: the SDK's `IntentToken` has `plan_hash` and `step_proofs`
+      and no separate merkle root. Aliasing one into the other would imply two independently
+      verified things where there is one.
+- [x] Verified live by frame census — guarded violation 1: 1 `__plan__`, 6 `__verdict__`
+      (5 ALLOW + 1 BLOCK_HARD), 5 `__step__` (the blocked call never executed), 6 `__state__`,
+      1 `__END__`.
+
+## v3 Phase D — generated, editable plan
+- [x] `agent/planner.py` — constrained generation against `tools/manifest.json`, temperature 0,
+      JSON-only output (with a brace-matching extractor, because models fence and preamble anyway),
+      one retry, then the nearest cached preset with `planner_fallback: true`.
+- [x] `validate()` is the load-bearing part and is tested as such — it is the only thing between a
+      model's output and `capture_plan()`. Eight rejection cases asserted individually: empty plan,
+      over the 8-step limit, non-existent tool, missing argument, unknown argument, an unbound
+      resource, a plan that never reads the dataset, and a plan ending on something that changes
+      nothing. It runs on panel-edited plans too, so what the judge signs is what was validated.
+- [x] `plans/cache/{BASELINE,INJECTION,ESCALATION}.json` + `--goal` / `--plan` intake on
+      `agent.main`. A bad plan exits with one judge-readable line, not a traceback (verified).
+- [x] **Phase D gate, all four live:**
+      - free-typed goal -> real LLM -> valid plan, no fallback, ran to completion. The model chose a
+        *different step order* than ours (`read_split` first), which is itself the evidence that the
+        plan is generated rather than dressed up.
+      - an edited plan round-trips and **the plan hash genuinely changes**: `b2683c491aa2300f` ->
+        `58c0d35e469c22d0`.
+      - **`docs/v3.md` §3.3's beat proven**: production declared up front in the plan -> 5 `ALLOW`s,
+        **no hold at all**, production promotion landed. The same call was held an hour earlier.
+        The hold fires on the gap between what was declared and what was reached for, not on the
+        word "production".
+      - planner failure falls back to a preset with a visible flag, asserted against a model that
+        refuses outright.
+
+## v3 Phase E — the ghost trace (what Garv is blocked on)
+- [x] `scripts/record_unguarded.py` — resets the databases, runs `agent.main --unguarded` **for
+      real**, records what actually came back, and resets again so the next run doesn't inherit the
+      damage. It never synthesises a frame.
+- [x] **`evidence/unguarded_trace.jsonl` written and verified** — 15 frames from run
+      `4ee6793f6689`, line 1 a `__trace__` header (`run_id`, `recorded_at`, `violation`, `frames`)
+      for the permanent `RECORDED` label `docs/v3.md` §5.4 requires.
+- [x] **Every replayable frame carries `step_index`**, asserted by the script itself, which exits
+      non-zero if any is missing — Garv syncs on step index and never on wall clock, so a trace
+      without them is useless to him. The pre-run state frame carries `step_index: -1` (the world
+      before step 0) rather than null, because the ghost needs a real value to drain *from*.
+- [x] Two recording bugs found by reading the output rather than trusting it: `agent.main`'s JSONL
+      audit lines were being recorded as if they were frames (padding the trace with 6 non-frames),
+      and the initial `__state__` had no index. Both fixed.
+- [x] The divergence is in the file and readable: step 4 `promoted to staging`, step 5
+      `40 rows deleted`, state `eval_rows 100 -> 60`, `__END__ outcome: unguarded`.
+- [x] **Full regression sweep after all of C, D and E:** `tests/verify_guarded.py` ALL CHECKS PASSED
+      (happy path, violation 1 blocked with 100 rows intact, violation 2 held with nothing written),
+      plus `agent.severity`, `agent.policy_gen`, `agent.planner` and `tests/test_mcp_servers.py`
+      self-checks all passing.
+- [ ] Full hold cycle under v3 (human approves on the dashboard -> `executed`) — still not re-run
+      since the severity rewrite. The hold half is verified; the approval leg needs a human.
+- [ ] Demo video — still not recorded.
 ### Batch 20 — GN Phase 4 (the ghost run) — mechanism built and verified, real gate BLOCKED
 **Flagging up front, per instruction**: `evidence/unguarded_trace.jsonl` does not exist.
 GN doc's own entry condition for this phase is "Phase 3 gate green, **and

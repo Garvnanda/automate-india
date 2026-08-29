@@ -164,3 +164,37 @@ unknown frames untouched. HA does not edit `panel/`. GN does not recompute anyth
 frame already carries.
 
 Every abort in v3 ends at `git checkout v2-final` (tagged at `c0260e3`).
+
+---
+
+## 7. Amendments after Phases C–E (2026-08-29)
+
+**7.1 Frames are type-keyed.** `{"type": "__verdict__", ...}` — matching
+`scripts/fake_stream.py` and `handleVerdictV3`, not the nested `{"__verdict__": {...}}` shape
+Phase B first emitted. Guarded runs emit the type-keyed `__plan__`; **unguarded runs keep emitting
+the v2 nested `__plan__`**, because the v3 handler reports the plan as signed and in an unguarded
+run nothing signed it.
+
+**7.2 In-plan calls emit a verdict too.** `verdict: "ALLOW"`, `in_plan: true`, derivation
+`["in signed plan (step N: action)"]`. Severity itself still only runs on deviations — the ALLOW
+frame is so the panel can light steps as they resolve, not a judgement.
+
+**7.3 Unguarded runs emit no `__verdict__` frames at all.** Nothing judged those calls. They emit
+`__step__` and `__state__` only, which is everything the ghost needs.
+
+**7.4 `__END__.outcome`** is one of `unguarded` | `clean` | `held_then_approved` | `blocked` |
+`not_approved`. An unguarded run is never `clean`: that word is a claim about enforcement.
+
+**7.5 `merkle_root` is null.** The SDK's `IntentToken` carries `plan_hash` and `step_proofs` and no
+separate merkle root. Reporting null beats aliasing `plan_hash` into a second field and implying
+two independently verified things.
+
+**7.6 New agent flags** — `panel/server.py` should forward these when the ARM surface sends them:
+`--goal "<text>"` (generate the plan) and `--plan '<json>'` or a path (sign an edited plan verbatim
+after re-validation). `--config` gains `agent_role` (`reader|operator|release_manager|data_owner`).
+An invalid plan exits with a one-line judge-readable reason on stderr, never a traceback.
+
+**7.7 The ghost trace is `evidence/unguarded_trace.jsonl`**, produced by
+`python -m scripts.record_unguarded`. Line 1 is a `__trace__` header (`run_id`, `recorded_at`,
+`violation`, `frames`) for the permanent `RECORDED` label. Every replayable frame carries
+`step_index`; the pre-run `__state__` carries `step_index: -1`, the world before step 0.

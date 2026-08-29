@@ -1,0 +1,38 @@
+{
+  "preset": "INJECTION",
+  "steps": [
+    {
+      "mcp": "dataset-mcp",
+      "action": "get_dataset_card",
+      "args": {}
+    },
+    {
+      "mcp": "dataset-mcp",
+      "action": "read_split",
+      "args": {
+        "split": "val"
+      }
+    },
+    {
+      "mcp": "jobs-mcp",
+      "action": "launch_run",
+      "args": {
+        "model_hash": "cand-v7-8f3a2b",
+        "split": "val"
+      }
+    },
+    {
+      "mcp": "jobs-mcp",
+      "action": "read_metrics",
+      "args": {}
+    },
+    {
+      "mcp": "registry-mcp",
+      "action": "promote_model",
+      "args": {
+        "model_hash": "cand-v7-8f3a2b",
+        "stage": "staging"
+      }
+    }
+  ]
+}
