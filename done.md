@@ -979,3 +979,58 @@ ship.
       scenarios (or the real backend) it did after Batch 18. The preview and the graph both read
       correctly; connecting "preview state → which scenario RUN plays" is next, once HA's planner
       makes RUN-from-an-arbitrary-draft real rather than another heuristic to maintain.
+
+### Batch 20 — GN Phase 4 (the ghost run) — mechanism built and verified, real gate BLOCKED
+**Flagging up front, per instruction**: `evidence/unguarded_trace.jsonl` does not exist.
+GN doc's own entry condition for this phase is "Phase 3 gate green, **and
+evidence/unguarded_trace.jsonl exists from HA**" — it's HA's Phase 4
+(`scripts/record_unguarded.py`), and it's structurally blocked on his Phase 1 too: a real
+unguarded run today still only emits the old v1/v2 frame shapes, not the `type`-tagged contract
+ones a trace needs to carry, so the recorder can't be written correctly yet without guessing his
+backend's eventual frame-emission wiring — exactly the "stop and ask" case CLAUDE.md's rule 1
+describes, extended to not inventing an undelivered teammate's output. **Need this file (or a
+status check with HA) before the real Phase 4 gate — "ghost stays synchronised through a full
+hold → dashboard approval → resume cycle" — can be verified for real.**
+
+Built the GN half in full anyway, against a throwaway local fixture (written to
+`evidence/unguarded_trace.jsonl` only for the length of this test, then deleted — never
+committed, so the real path stays honestly empty for HA to fill):
+
+- [x] **`panel/server.py`**: `GET /api/ghost_trace` reads `evidence/unguarded_trace.jsonl` if it
+      exists and returns `{frames, path, run_id}`; a clean 404 `{"error": "no unguarded trace
+      recorded yet"}` if it doesn't. Nothing fabricates a trace when the file is missing.
+- [x] **`panel/index.html`** — the ghost replays in lane A (the scope's existing unguarded lane
+      and its gauge/readout — reused, not duplicated) while a live guarded run plays in lane B.
+      `advanceGhost()` pops and applies one group of trace frames every time the LIVE run resolves
+      one step — via the `__step__` handler for in-plan calls and `handleVerdictV3` for anything
+      that resolves without one (a hold, a block) — never on a timer, so a real dashboard approval
+      wait freezes the ghost too instead of it running ahead. Permanently labelled `RECORDED ·
+      UNGUARDED · <run id> · evidence/unguarded_trace.jsonl`, with a `g`-key kill switch that
+      freezes/hides the layer (built alongside the layer itself, per GN doc §5.3, not after it
+      desyncs on stage).
+- [x] **Found and fixed a real, pre-existing bug this surfaced**: `applyState()` (which the
+      end-of-run `__final_state__` frame calls) picked its lane from `guardedMode` — the real
+      GUARDED toggle — not from which lane the run actually used. A `?fake=` dev run never touches
+      that toggle, so its own end-of-run real-DB snapshot was silently overwriting lane A's numbers
+      back to the untouched real database, clobbering whatever the run (fake or, now, ghost) had
+      just drawn there. This was live before Phase 4 too — Batch 18/19's fake-run screenshots that
+      happened to show plausible numbers were probably real leftover DB state coinciding with the
+      narrative, not proof the routing was correct. Fixed: lane picked from `activeLaneKey` first,
+      falling back to `guardedMode` only when idle. Confirmed via direct DOM inspection (not just a
+      screenshot): before the fix, `numA` stuck at the real DB's `100` throughout a fake `blocked`
+      run despite the fixture's own `delete_rows` step recording `eval_rows: 60`; after the fix,
+      `numA` correctly read `60` while `numB` (the live, blocked side) held `100` — the actual
+      before/after divergence the ghost exists to show.
+- [x] **Verified live against the throwaway fixture** (deleted after): `?fake=blocked` — ghost
+      gauge settled at 60 (red), live guarded gauge held 100 (green), `RECORDED` label correct with
+      the real file path and run id. `?fake=held` — mid-hold screenshot caught the ghost step
+      applied and frozen at the same point the live side froze, confirming step-index sync rather
+      than a wall-clock replay. Kill-switch logic verified by dispatching the keydown directly
+      (`ghostOn` toggles, label blanks) — a live `g` keypress through the browser-automation layer
+      didn't reliably register in the same test, likely a synthetic-event quirk rather than a code
+      bug, not chased further given the fixture is about to be deleted regardless.
+- [ ] **Real gate unverified** — needs `evidence/unguarded_trace.jsonl` from HA's
+      `scripts/record_unguarded.py`, which itself needs his Phase 1 (real contract-shaped frames
+      out of `agent.main`) to exist first.
+- [ ] Kill switch's live keypress path not independently confirmed (see above) — logic verified,
+      real-key path worth a manual check once a person is at the keyboard rather than automation.

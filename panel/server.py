@@ -53,6 +53,7 @@ def seed_for(cfg):
 
 PORT = int(os.environ.get("PORT", 8080))
 PY = sys.executable
+GHOST_TRACE_PATH = ROOT / "evidence" / "unguarded_trace.jsonl"
 
 
 def same_origin(handler):
@@ -184,8 +185,31 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "cross-origin request refused"}, status=403)
             return self._ask(parse_qs(parsed.query))
 
+        if parsed.path == "/api/ghost_trace":
+            return self._ghost_trace()
+
         self.send_response(404)
         self.end_headers()
+
+    def _ghost_trace(self):
+        """v3 Phase 4 — the recorded unguarded trace the ghost layer replays.
+        HA's scripts/record_unguarded.py (docs/implementation-HA.md §6) is
+        what's meant to produce this file; nothing here fabricates one if
+        it's missing — the panel just says so, honestly, same as v1's rule."""
+        if not GHOST_TRACE_PATH.exists():
+            return self._json({"error": "no unguarded trace recorded yet"}, status=404)
+        frames, run_id = [], None
+        for line in GHOST_TRACE_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                f = json.loads(line)
+            except ValueError:
+                continue
+            frames.append(f)
+            run_id = run_id or f.get("run_id")
+        return self._json({"frames": frames, "path": "evidence/unguarded_trace.jsonl", "run_id": run_id})
 
     def do_POST(self):
         parsed = urlparse(self.path)
