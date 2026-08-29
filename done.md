@@ -1356,3 +1356,40 @@ this session.
       "ghost stays synchronised through a full hold → dashboard approval → resume cycle" — is
       verified for real, not just against `fake_stream.py`. Phase 6 will not be built — see
       CONTRACT.md §5.
+
+## v3 Phase 5 — UN-struck and shipped: SCOPEBREACH is real
+Reopened on the user's decision after the Phase 0 spike had struck it. What made it cheap: **Garv's
+half was already merged** — `panel/index.html:2180` maps `SCOPEBREACH` to its own class, `:528`
+gives it a distinct red node, `:2184` renders the `EVALUATOR ONLY` label, and
+`scripts/fake_stream.py:181` drives it. Only the backend was missing.
+
+- [x] `agent/crew.py` — sub-plans **derived, not typed in**: the deployer is the terminal commit
+      (the first step whose manifest `writes` include `promotions`) and everything after it, the
+      evaluator is everything before. Asserted three ways in its own self-check: the standard plan
+      splits 4/1, a plan that commits earlier splits earlier with no edit anywhere, and a plan that
+      never commits has no deployer at all.
+- [x] `delegation_hash()` = sha256 over the parent plan hash + the delegate's own steps, so the
+      chain `plan_hash -> delegation_hash -> step_proof` is verifiable by anyone holding the plan.
+      Asserted stable, and asserted to differ when the parent differs.
+- [x] **The boundary is checked first in `ArmorGuard.call()`, before anything else** — deliberately,
+      because nothing downstream can see it. The parent plan contains the action, so ArmorIQ would
+      allow it, the role check passes, and severity has nothing to say: the crew genuinely holds the
+      authority. Only this delegate does not. Not routed through the severity matrix either — the
+      call is not irreversible, not tampering and not an escalation, and its derivation says the one
+      real reason instead of four irrelevant ones.
+- [x] `--crew` (clean two-delegate run) and `--force-violation 3` (the breach) on `agent.main`;
+      new `__delegate__` frame when control passes; every verdict in a crew run carries `delegate`
+      and `delegation_hash` so GN's rings can key off them.
+- [x] **Proven live through the real proxy**, not against the fake stream: the evaluator executed its
+      four legitimate steps, then reached for `promote_model` — correct tool, correct argument, in
+      the signed plan, role held — and was refused. `SCOPEBREACH`, exit 2, `promotions` empty,
+      derivation reading *"in the crew's signed plan (step 5: promote_model) / not in evaluator's
+      sub-plan (4 steps: ...) / -> authorized for the crew, not for this delegate"*.
+- [x] **Unexpected bonus, checked rather than assumed:** the `step_proof` on those verdicts is a
+      **real** Merkle proof from the SDK's intent token (`/steps/[4]/tool`, six sibling hashes with
+      L/R/S positions), so the PROOF surface shows a genuine platform proof beside our own
+      delegation hash. `CONTRACT.md` §8 records which half is whose — that distinction must survive
+      contact with a judge, and it is the difference between a claim and an overclaim.
+- [x] `tests/verify_guarded.py` gained a fourth section asserting the cross-scope block, that
+      nothing was promoted, and that the recorded reason is the *boundary* rather than severity or a
+      role check. **Suite green: happy path · violation 1 · violation 2 · cross-scope.**

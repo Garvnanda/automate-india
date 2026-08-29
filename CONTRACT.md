@@ -198,3 +198,34 @@ An invalid plan exits with a one-line judge-readable reason on stderr, never a t
 `python -m scripts.record_unguarded`. Line 1 is a `__trace__` header (`run_id`, `recorded_at`,
 `violation`, `frames`) for the permanent `RECORDED` label. Every replayable frame carries
 `step_index`; the pre-run `__state__` carries `step_index: -1`, the world before step 0.
+
+---
+
+## 8. Phase 5 is UN-struck — SCOPEBREACH is live (2026-08-29)
+
+§5 stands as the record of what the SDK does not do. What changed is that the boundary is now
+enforced by **our** code, and shipped.
+
+**Say this exactly, and never blur it:** ArmorIQ signs the parent plan and enforces membership of
+it — real, cryptographic, verified. The delegation boundary below is enforced by `agent/crew.py`,
+because `delegate_subtree()`'s confinement demonstrably is not (§5). The `delegation_hash` we print
+is ours: sha256 over the parent plan hash and the delegate's own steps. The `step_proof` beside it
+**is** the SDK's real Merkle proof from the intent token. Two different provenances on one line —
+a judge who asks must get the distinction, not a hand-wave.
+
+**Frames.** `SCOPEBREACH` appears as a normal `__verdict__` (`in_plan: true`, `approvable: false`,
+`delegate` set, `delegation_hash` set) — no new handler needed, `panel/index.html:2180` already maps
+it. One new frame when control passes to a delegate:
+
+```jsonc
+{ "type": "__delegate__", "delegate": "evaluator",
+  "steps": ["get_dataset_card", "read_split", "launch_run", "read_metrics"],
+  "plan_hash": "b2683c49…", "delegation_hash": "b1f96bce…" }
+```
+
+Every verdict from a crew run carries `delegate`, so the rings in GN's §7 can key off it. The
+sub-plans are **derived** — the deployer is the terminal commit (the first step writing
+`promotions`) and everything after it; the evaluator is everything before. Change the plan and the
+split moves; nothing names an action.
+
+**Running it:** `--crew` for the clean two-delegate run, `--force-violation 3` for the breach.
