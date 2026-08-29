@@ -10,3 +10,4 @@ armoriq.yaml
 
 # screen recordings — keep them locally, they are far too large for git
 *.mp4
+data/.run.lock
