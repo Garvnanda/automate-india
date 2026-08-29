@@ -941,3 +941,127 @@ v3 code was written.
       the severity rewrite.
 - [ ] Phase C (remaining frames: `__step__`/`__hold__`/`__resume__`/`__state__`), Phase D (planner),
       Phase E (trace recorder) — not started.
+## v3 — severity layer, generated plans, delegation, the ghost (docs/v3.md)
+Scope split: HA owns severity engine / policy generation / planner / delegation
+(`docs/implementation-HA.md`); this session owns the panel rework and the SSE frame layer
+(`docs/implementation-GN.md`). `CONTRACT.md` was never committed — `docs/implementation-HA.md` §1
+already specifies the frame shapes verbatim (same content GN's Phase 0 expects to read), so that
+section was treated as the frozen contract rather than waiting on a separate commit.
+
+### Batch 18 — GN Phase 0 (fake emitter) + Phase 1 (verdicts, derivations, generated policy)
+- [x] **`scripts/fake_stream.py`** — new. `--scenario clean|blocked|held|approved|scopebreach`
+      replays hand-written frames in the exact shapes from `docs/implementation-HA.md` §1
+      (`__plan__`, `__verdict__`, `__step__`, `__hold__`, `__resume__`, `__state__`, `__END__`),
+      one JSON line per `print()`, at realistic pauses (0.15–1.2s). Not throwaway — this is the
+      panel's regression harness and screenshot tool until HA's severity engine ships, and the
+      documented fallback if his backend is unstable at demo time. `blocked` covers the
+      `delete_rows` BLOCK_HARD case verbatim from the v3.md §2.8 example; `held` covers a
+      production promotion held then approved; `approved` covers closer A (production
+      pre-authorized, straight through, no hold); `scopebreach` covers the evaluator delegate
+      reaching for a crew-authorized-but-not-delegate-authorized `promote_model`.
+- [x] **`panel/server.py`**: `/api/run?fake=<scenario>` spawns `scripts/fake_stream.py` instead of
+      `agent.main`, reusing the exact same SSE plumbing (extracted the subprocess-streaming loop
+      into `_stream_subprocess()` so the real and fake paths share one implementation). No DB
+      seed, no infra check, no `cfg` parsing on this path — deliberately bypassed, this is a dev
+      tool, not a run mode.
+- [x] **`panel/index.html` — v3 verdict rendering, additive, does not touch the existing real-run
+      path.** New frames are dispatched by a top-level `type` field (`__plan__`, `__verdict__`,
+      `__step__`, `__hold__`, `__resume__`, `__state__`, `__END__`) in `handleEvent()`, checked
+      *before* the old shape checks (nested `__plan__`, lowercase `verdict`) — today's real
+      `agent.main` only ever emits the old shape, so nothing here fires against a real run yet and
+      the working guarded/unguarded demo is unaffected.
+      - All five verdicts render: `ALLOW`→in-flight amber then green on `__step__`, `HOLD`→amber +
+        key dial arms + timer, `BLOCK`/`SCOPEBREACH`→red, `BLOCK_HARD`→red **plus** its own
+        `NO APPROVAL PATH` annunciator lamp (new, next to BLOCK) and a small badge on the plan-strip
+        cell — a different lamp entirely, not a label on the same one, per the "must be visibly a
+        different category" requirement.
+      - `derivation` arrays print verbatim as sentences in three places: the console (one line per
+        sentence), a new dedicated `.vcard` derivation card under the plan strip (latest verdict,
+        colour-coded by category), and reused in the existing hover-tooltip pattern via the same
+        data the plan-strip cell carries.
+      - `generated_policy` from `__plan__` renders in a new small monospace `.policy` panel below
+        the plan strip — hidden when the field is absent (old real `__plan__` frames never carry
+        it, so this stays invisible against the current backend, no behaviour change there).
+      - `SCOPEBREACH` shows the delegate name inline (`EVALUATOR ONLY`); `NOTED` renders `.done`
+        with a dim `NOTED` flag, matching "ships disabled, render as allowed+logged if it ever
+        appears."
+      - Dev/test entry point: `?fake=<scenario>` on the page URL drives a real `EventSource` against
+        `/api/run?fake=...` through the exact same `handleEvent()` code every real run uses —
+        deliberately not wired to any visible panel control, this is a testing tool.
+- [x] **Verified live in a real browser**, not just curl: `?fake=blocked` — 4 green ALLOW steps,
+      `delete_rows` lands in the trailing slot tagged `NO APPROVAL PATH` in red, the `NO APPROVAL`
+      lamp lights (distinct from `BLOCK`), console shows the exact 4-line derivation from v3.md
+      §2.8, generated policy panel renders. `?fake=held` — reads flow, production promotion pulses
+      amber with its 3-line authority-delta derivation, key dial arms and times, then resumes and
+      turns to `APPROVED · approved by approver@example.com`. `?fake=scopebreach` — the evaluator's
+      in-plan `promote_model:staging` step itself (not the trailing slot) turns red with an
+      `EVALUATOR ONLY` badge and the "authorized for the crew, not for this delegate" derivation.
+      No JS errors, no layout breakage in any of the three.
+- [x] Orphaned-process cleanup done again before this test (8 stray python.exe from earlier
+      sessions, two of them bound to port 8080 with stale server code) — same class of bug as
+      Batch 17, force-kill during iteration is what causes it. One clean `panel.server --no-infra`
+      instance left running at the end of this batch for continued local testing.
+- [ ] HA's Phase 0 (`delegate()` verification) and Phase 1 (manifest + severity engine + policy
+      generation) status unknown from this session — coordinate before wiring the fake-only
+      rendering above against his real output.
+
+### Batch 19 — GN Phase 2 (ARM role + live plan preview) + Phase 3 (plan graph)
+Both built without HA's real planner/severity engine, per GN doc's own instruction to work
+against a static draft plan. Everything HA-shaped stays isolated in `panel/manifest_stub.py`
+(mechanical reads/writes/role facts only, no verdicts — same discipline v3.md §2.2 asks of the
+real manifest) headed by a comment saying to delete it once his real manifest/severity engine
+ship.
+
+- [x] **`panel/manifest_stub.py`** — new. `ACTION_MANIFEST` mirrors `agent/plan.py`'s
+      `STEP_LIBRARY`/`_ORDER` exactly (same action names, same canonical order — this preview can
+      never disagree with what a real run actually signs), plus `reads`/`writes`/`role` per action.
+      `edges_for()` implements v3.md §4.2's own definition literally (B reads what A wrote, or both
+      touch the same resource) — mechanical lookup, not a policy decision. `evidence_base_for()`
+      implements HA doc §3.2's stated simplification (all reads by non-terminal steps) verbatim.
+- [x] **`panel/plan_preview.py`** — `build_plan_frame(authorized, promote_production, agent_role)`
+      assembles a draft plan the same way `agent/plan.py`'s `build_plan()` does, computes a sha256
+      plan_hash, `required_role`/`authority_delta` per step, edges, evidence_base, and a generated-
+      policy string. Every frame carries `"dev_preview": true` and the policy text itself says
+      "recomputed live, not ArmorIQ's signature" — labelled as mock at the data layer, not just in
+      the UI, so it can't accidentally get treated as real downstream.
+- [x] **`panel/server.py`**: `POST /api/plan/preview` — same CSRF gate as every other state-
+      changing endpoint, 400s on a bad body rather than 500ing.
+- [x] **`panel/index.html` — kept structurally separate from the real run's strip/graph on
+      purpose.** A new ROLE knob (reader/operator/release_manager) and a `PLAN PREVIEW` card,
+      visibly flagged `DEV · RECOMPUTED LIVE, NOT SIGNED`, update on every AUTHORIZE switch or role
+      change via a debounced POST to the preview endpoint — chips per step (`action:stage ·
+      required_role`), amber-ringed if that step would hold at the current role, and a status line
+      naming exactly which calls would hold and why. This never touches `#planbar`/`#psteps` (the
+      real run's strip, Phase-1-verified) or feeds the graph below — a mock hash can never land next
+      to a real one.
+- [x] **Phase 3 — the plan graph, additive alongside the existing strip, fed by the exact same
+      real `__plan__`/`__verdict__`/`__step__` frames Phase 1 already renders**, not a second
+      preview instance. SVG, positions frozen at sign time (index-based, no reflow, no physics):
+      order-only connectors between every consecutive step (thin, no data claim) plus the frame's
+      real `edges` drawn brighter with the resource name labelled; nodes whose reads/writes
+      intersect `evidence_base` get a dashed amber ring; a trailing dashed slot mirrors the strip's
+      intruder cell for whatever lands outside the plan. Verdict painting reuses the exact same
+      `V3_CLASS` taxonomy already driving the strip, so BLOCK_HARD/SCOPEBREACH/HOLD/NOTED all look
+      the same way they do on the strip, one function away from drifting.
+- [x] **Verified live in the browser, all three risky scenarios, not just the happy path:**
+      `?fake=blocked` — five green nodes, four with the dashed evidence ring, `delete_rows` in the
+      trailing slot red with `NO APPROVAL PATH`, edge labels (`dataset_card`/`labels`/`metrics`
+      ×2) all legible. `?fake=held` — mid-hold screenshot caught the production node amber or the
+      graph's own intruder slot, dashed-connected, labelled `held`. `?fake=scopebreach` — the
+      in-plan `promote_model:staging` node itself (not the trailing slot) turns red with
+      `EVALUATOR ONLY`, trailing slot stays empty. No JS errors in any.
+- [x] **Live-tested the preview independently of any run**: toggling PROD live-updated the chip
+      list and hash with no page reload; cycling the ROLE knob reader→operator→release_manager
+      correctly widened then closed the "would HOLD" list each step, ending at "no hold at this
+      role" once release_manager was granted — closer A, working before RUN is ever pressed.
+- [ ] Reordering / drag-to-edit steps, free-text goal field, dataset/model picker beyond the one
+      real pair — deliberately skipped. None of it is in v3.md §8's actual rehearsed demo script
+      (delete a step, add it back, change one argument — order never changes), and a free-text goal
+      field would be dishonest UI with no real planner behind it yet. Revisit once HA's planner
+      exists; until then this matches GN doc's own documented abort path ("presets only, editor
+      still works over the preset plan").
+- [ ] Not wired: an edited/authorized draft actually driving a real `RUN` through `agent.main` or
+      through a role-aware fake scenario — RUN still runs the same five canned fake_stream
+      scenarios (or the real backend) it did after Batch 18. The preview and the graph both read
+      correctly; connecting "preview state → which scenario RUN plays" is next, once HA's planner
+      makes RUN-from-an-arbitrary-draft real rather than another heuristic to maintain.

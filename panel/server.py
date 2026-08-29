@@ -32,6 +32,7 @@ from agent import infra  # noqa: E402
 from agent.config import DATASET_DB_PATH, EVAL_SPLIT, REGISTRY_DB_PATH, SESSION_FILE  # noqa: E402
 from agent.runconfig import RunConfig  # noqa: E402
 from data.seed import seed  # noqa: E402
+from panel import plan_preview  # noqa: E402
 
 
 def cfg_from_query(query):
@@ -198,6 +199,19 @@ class Handler(BaseHTTPRequestHandler):
             n = seed_for(cfg)
             return self._json({"seeded": n, **current_state()})
 
+        if parsed.path == "/api/plan/preview":
+            if not same_origin(self):
+                return self._json({"error": "cross-origin request refused"}, status=403)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or b"{}")
+                frame = plan_preview.build_plan_frame(
+                    body.get("authorized") or [], bool(body.get("promote_production")),
+                    body.get("agent_role") or "operator")
+            except (ValueError, TypeError, KeyError) as e:
+                return self._json({"error": f"bad draft plan — {e}"}, status=400)
+            return self._json(frame)
+
         self.send_response(404)
         self.end_headers()
 
@@ -208,12 +222,19 @@ class Handler(BaseHTTPRequestHandler):
     def _run(self, query):
         mode = (query.get("mode") or ["unguarded"])[0]
         violation = (query.get("violation") or ["0"])[0]
+        fake = (query.get("fake") or [None])[0]
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
         self.end_headers()
+
+        if fake:
+            # v3 contract dev/screenshot path — scripts/fake_stream.py replays
+            # hand-written frames over this same SSE endpoint. No DB, no infra,
+            # no real agent involved.
+            return self._stream_subprocess([PY, "-u", "scripts/fake_stream.py", "--scenario", fake])
 
         if mode == "guarded" and not SESSION_FILE.exists():
             self._sse(f"ERROR: enforcement session not ready — {INFRA['message']}")
@@ -242,6 +263,9 @@ class Handler(BaseHTTPRequestHandler):
         if mode == "guarded" and violation == "2":
             args += ["--hold-timeout", (query.get("holdTimeout") or ["600"])[0]]
 
+        self._stream_subprocess(args)
+
+    def _stream_subprocess(self, args):
         proc = subprocess.Popen(
             args, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
