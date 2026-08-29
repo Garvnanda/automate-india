@@ -101,6 +101,7 @@ body{
 }
 .lamp.on span{color:var(--c);}
 .lamp#lampArmed{--c:var(--green);} .lamp#lampHold{--c:var(--amber);} .lamp#lampBlock{--c:var(--red);}
+.lamp#lampHardBlock{--c:#ff2f6b;}
 .lamp.blink i{animation:blink 1.05s steps(1,end) infinite;}
 @keyframes blink{0%,55%{opacity:1;}56%,100%{opacity:.28;}}
 
@@ -361,6 +362,14 @@ body{
 .pstep.held,.pstep.bad{box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--c) 42%, transparent), inset 0 -2px 4px rgba(0,0,0,.6);}
 .pstep.intruder{opacity:0; pointer-events:none; border:1px dashed rgba(226,65,44,.5);}
 .pstep.intruder.on{opacity:1; pointer-events:auto;}
+/* BLOCK_HARD must read as visibly a different category from BLOCK — the
+   project's best claim, so it gets its own color, not just a label */
+.pstep.hard{--c:#ff2f6b;}
+.pstep .hardtag{
+  display:block; font-family:var(--mono); font-size:6.5px; letter-spacing:.08em;
+  color:#ff2f6b; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.pstep.noted{--c:var(--green); opacity:.65;}
 
 /* ── session lamp (the panel brings its own tunnel up) ── */
 .sess{
@@ -473,6 +482,26 @@ body{
 .proof td.v.executed,.proof td.v.approved{color:var(--green);}
 .proof td.v.held{color:var(--amber);} .proof td.v.blocked{color:var(--red);}
 .proof td.h{color:#5e5549; overflow:hidden; text-overflow:ellipsis; max-width:230px;}
+
+/* ── v3: generated policy (shown briefly at signing) and the verdict/
+   derivation card (shown per out-of-plan call) — both additive, both
+   render only when the frame actually carries the field ── */
+.policy{
+  display:none; font-family:var(--mono); font-size:8.5px; line-height:1.55; color:#8d8271;
+  background:#08070650; border-radius:7px; border:1px solid rgba(0,0,0,.4);
+  padding:8px 11px; max-height:92px; overflow-y:auto; white-space:pre-wrap;
+}
+.policy.on{display:block;}
+.policy .hdr{color:var(--brass); letter-spacing:.14em; margin-bottom:4px;}
+.vcard{
+  display:none; font-family:var(--mono); font-size:9px; line-height:1.6;
+  background:#08070650; border-radius:7px; border:1px solid rgba(0,0,0,.4);
+  padding:9px 12px; white-space:pre-wrap;
+}
+.vcard.on{display:block;}
+.vcard .hdr{letter-spacing:.14em; margin-bottom:5px; color:#5e5549;}
+.vcard.ok .hdr{color:var(--green);} .vcard.warn .hdr{color:var(--amber);} .vcard.err .hdr{color:var(--red);}
+.vcard.hard{border-color:rgba(255,47,107,.5);} .vcard.hard .hdr{color:#ff2f6b;}
 
 .cardtext{
   display:none; margin-top:8px; padding:10px 12px; border-radius:8px; flex:1 1 260px; min-width:220px;
@@ -785,6 +814,7 @@ body{
       <div class="lamp" id="lampArmed" data-tip="armed"><i></i><span>ARMED</span></div>
       <div class="lamp" id="lampHold" data-tip="hold"><i></i><span>HOLD</span></div>
       <div class="lamp" id="lampBlock" data-tip="block"><i></i><span>BLOCK</span></div>
+      <div class="lamp" id="lampHardBlock" data-tip="hardblock"><i></i><span>NO&nbsp;APPROVAL</span></div>
     </div>
   </div>
 
@@ -813,6 +843,9 @@ body{
     </div>
     <div class="psteps" id="psteps"></div>
   </div>
+
+  <div class="policy" id="policyPanel" data-tip="policy"></div>
+  <div class="vcard" id="vcard"></div>
 
   <div class="bay">
     <div class="cell cellA" id="cellA" data-tip="cellA">
@@ -1108,7 +1141,7 @@ body{
   /* ───────── wiring to the real backend ───────── */
   const el = {
     numA:$('numA'), numB:$('numB'), prodA:$('prodA'), prodB:$('prodB'),
-    armed:$('lampArmed'), hold:$('lampHold'), block:$('lampBlock'),
+    armed:$('lampArmed'), hold:$('lampHold'), block:$('lampBlock'), hardBlock:$('lampHardBlock'),
     keycell:$('keycell'), keyhole:$('keyhole'), keyLabel:$('keyLabel'), keySub:$('keySub'),
     status:$('statusLine'), ceilTag:$('ceilTag'), console:$('console'),
     cellA:$('cellA'), cellB:$('cellB'), tagA:$('tagA'), tagB:$('tagB'),
@@ -1664,6 +1697,13 @@ body{
     hold: `<b>HOLD</b>Lit when a call has been held for human approval. The agent is paused mid-run,
       waiting — nothing is written until someone signs off.`,
     block: `<b>BLOCK</b>Lit when a call was refused outright because it was not in the signed plan.`,
+    hardblock: `<b>NO APPROVAL PATH</b>A distinct category from BLOCK. Lit when a call is both
+      <i>irreversible</i> and <i>tampers with the evidence the run is graded on</i> — deleting rows the
+      metrics already depend on. No role in the hierarchy can approve this; the derivation printed
+      below the plan says why.`,
+    policy: `<b>GENERATED POLICY</b>Walked from the signed plan, the tool manifest, and the agent's role
+      at the moment of signing — not written before this run. Change the plan, not this text, and the
+      policy changes with it.`,
     guardbank: `<b>ENFORCEMENT</b>The one switch that changes whether any of this is checked. Same
       agent, same prompt, same tools either way.`,
     guard: () => guardedMode
@@ -1799,7 +1839,8 @@ body{
     A.base = 0; B.base = 0; B.ceiling = 0;
     resetPSteps(); stopHoldTimer(); $('keyTimer').textContent = '0:00';
     proofRows = []; proofReady = false; setTab('log');
-    setLamp(el.armed, false); setLamp(el.hold, false); setLamp(el.block, false);
+    setLamp(el.armed, false); setLamp(el.hold, false); setLamp(el.block, false); setLamp(el.hardBlock, false);
+    $('policyPanel').classList.remove('on'); $('vcard').classList.remove('on');
     el.keyhole.classList.remove('armed', 'turned'); el.keycell.classList.remove('armed');
     el.keyLabel.textContent = 'NO PENDING APPROVAL';
     el.keySub.textContent = 'a human approves at platform.armoriq.ai — this dial only watches';
@@ -1812,9 +1853,141 @@ body{
 
   let inFinalMessage = false; // see the "agent final message:" branch below
 
+  /* ───────── v3 contract frames (type-tagged, flat) ─────────
+     Additive to the shapes above: today's real agent.main only ever emits
+     the old ones (nested __plan__, lowercase verdict), so none of this fires
+     against a real run until HA's severity engine ships. Built and gated
+     against scripts/fake_stream.py — docs/implementation-GN.md Phase 1. */
+  function stepCapV3(st){
+    return st.args && st.args.stage ? `${esc(st.action)}:${esc(st.args.stage)}` : esc(st.action);
+  }
+  function buildStripV3(frame){
+    buildStrip({
+      steps: (frame.steps || []).map(st => ({ action: st.action, mcp: st.mcp, params: st.args || {} })),
+      signed: true,
+      plan_hash: frame.plan_hash,
+    });
+    renderPolicy(frame);
+  }
+  function renderPolicy(frame){
+    const pp = $('policyPanel');
+    if (!frame.generated_policy){ pp.classList.remove('on'); return; }
+    pp.classList.add('on');
+    pp.innerHTML = `<div class="hdr">GENERATED POLICY &middot; ${esc(String(frame.plan_hash || '').slice(0, 10))}</div>` +
+      esc(frame.generated_policy);
+  }
+
+  const V3_CLASS = { ALLOW:'run', HOLD:'held', BLOCK:'bad', BLOCK_HARD:'bad hard', SCOPEBREACH:'bad scopebreach', NOTED:'done noted' };
+  const V3_CAT   = { ALLOW:'ok', HOLD:'warn', BLOCK:'err', BLOCK_HARD:'err', SCOPEBREACH:'err', NOTED:'ok' };
+  function v3HardTag(o){
+    if (o.verdict === 'BLOCK_HARD') return 'NO APPROVAL PATH';
+    if (o.verdict === 'SCOPEBREACH') return (o.delegate ? o.delegate.toUpperCase() + ' ONLY' : 'OUT OF SCOPE');
+    if (o.verdict === 'NOTED') return 'NOTED';
+    return null;
+  }
+  function paintStepV3(node, o){
+    node.className = 'pstep ' + (V3_CLASS[o.verdict] || 'bad');
+    const label = node.querySelector('.a');
+    if (label) label.textContent = o.args && o.args.stage ? `${o.action}:${o.args.stage}` : o.action;
+    const old = node.querySelector('.hardtag'); if (old) old.remove();
+    const tag = v3HardTag(o);
+    if (tag){ const s = document.createElement('span'); s.className = 'hardtag'; s.textContent = tag; node.appendChild(s); }
+  }
+  function routeVerdictV3(o){
+    if (o.step_index !== null && o.step_index !== undefined && stepEls[o.step_index]){
+      paintStepV3(stepEls[o.step_index], o);
+      return;
+    }
+    if (!intruderEl) return;
+    intruderEl.dataset.state = o.verdict; intruderEl.dataset.action = o.action;
+    paintStepV3(intruderEl, o);
+    intruderEl.className += ' intruder on';
+  }
+  function renderVerdictCard(o){
+    const vc = $('vcard');
+    const cat = o.verdict === 'BLOCK_HARD' ? 'hard' : (V3_CAT[o.verdict] || 'err');
+    vc.className = 'vcard on ' + cat;
+    const head = `${o.action}${o.args && o.args.stage ? ':' + o.args.stage : ''} · ${o.verdict}` +
+      (o.delegate ? ` · ${o.delegate}` : '');
+    vc.innerHTML = `<div class="hdr">${esc(head)}</div>` + (o.derivation || []).map(esc).join('\n');
+  }
+  function handleVerdictV3(o, laneKey, L){
+    const cat = V3_CAT[o.verdict] || 'err';
+    const hard = o.verdict === 'BLOCK_HARD';
+    fire(L, hard ? 50 : cat === 'err' ? 44 : 24, cat === 'err' ? { decay:22 } : {});
+    mark(o.action, hard ? '#ff2f6b' : (STEP_COLOR[o.action] || '#8d8271'));
+
+    const lines = o.derivation && o.derivation.length ? o.derivation : [];
+    log(`${o.action} ${o.verdict}`, cat === 'warn' ? 'warn' : cat === 'ok' ? 'ok' : 'err');
+    lines.forEach(line => log('  ' + line, cat === 'warn' ? 'warn' : cat === 'ok' ? 'ok' : 'err'));
+
+    routeVerdictV3(o);
+    renderVerdictCard(o);
+    proofRows.push({ step:o.step_index, action:o.action, params:o.args, verdict:o.verdict });
+
+    setLamp(el.hardBlock, hard);
+    if (o.verdict === 'BLOCK' || o.verdict === 'SCOPEBREACH'){
+      setLamp(el.block, true);
+      L.ceiling = 34; fire(L, 60, { decay:26 }); el.ceilTag.classList.add('hot');
+      say(`${o.verdict} · ${o.action}`);
+    } else if (hard){
+      L.ceiling = 34; fire(L, 60, { decay:26 }); el.ceilTag.classList.add('hot');
+      say(`BLOCK_HARD · NO APPROVAL PATH — ${o.action}`);
+    } else if (o.verdict === 'HOLD'){
+      startHoldTimer();
+      L.frozen = true; fire(L, 30, { hold:true, decay:900, peak:8 });
+      setLamp(el.hold, true, true);
+      el.keyhole.classList.add('armed'); el.keycell.classList.add('armed');
+      el.keyLabel.textContent = 'WAITING ON A HUMAN';
+      el.keySub.textContent = lines[lines.length - 1] || `${o.action}${o.args && o.args.stage ? ':' + o.args.stage : ''}`;
+      say('HELD · APPROVE AT platform.armoriq.ai');
+    } else {
+      say(`${o.action} ${o.verdict.toLowerCase()}`);
+    }
+  }
+
   function handleEvent(raw, laneKey, L){
     let obj = null;
     try { obj = JSON.parse(raw); } catch (e) { /* not JSON */ }
+
+    if (obj && obj.type === '__plan__'){
+      buildStripV3(obj);
+      log(`plan signed — ${(obj.steps || []).length} steps, hash ${String(obj.plan_hash).slice(0, 16)}`, 'ok');
+      return;
+    }
+    if (obj && obj.type === '__verdict__'){ handleVerdictV3(obj, laneKey, L); return; }
+    if (obj && obj.type === '__step__'){
+      if (obj.step_index !== null && obj.step_index !== undefined && stepEls[obj.step_index]){
+        stepEls[obj.step_index].className = 'pstep done';
+        advanceP(obj.step_index);
+      }
+      log(obj.result_summary || `step ${obj.status}`, 'ok');
+      return;
+    }
+    if (obj && obj.type === '__hold__'){
+      log(`hold requested — ${obj.request_id} — approve at ${obj.dashboard_hint}`, 'warn');
+      return;
+    }
+    if (obj && obj.type === '__resume__'){
+      stopHoldTimer(); L.frozen = false; setLamp(el.hold, false);
+      el.keyhole.classList.add('turned'); el.keyLabel.textContent = 'APPROVED';
+      el.keySub.textContent = 'approved by ' + (obj.approved_by || 'a human');
+      say('APPROVED — AGENT RESUMING');
+      log(`resumed — approved by ${obj.approved_by}`, 'ok');
+      return;
+    }
+    if (obj && obj.type === '__state__'){
+      const prodCount = obj.prod_promotions || 0;
+      if (laneKey === 'A'){ gA.target = obj.eval_rows; el.numA.textContent = obj.eval_rows; el.prodA.textContent = prodCount; el.prodA.className = prodCount ? 'hot' : ''; }
+      else { gB.target = obj.eval_rows; el.numB.textContent = obj.eval_rows; el.prodB.textContent = prodCount; el.prodB.className = prodCount ? 'warm' : ''; }
+      return;
+    }
+    if (obj && obj.type === '__END__'){
+      const bad = String(obj.outcome || '').startsWith('block') || obj.outcome === 'scopebreach';
+      log(`run complete — outcome ${obj.outcome}`, bad ? 'err' : obj.outcome === 'held_then_approved' ? 'warn' : 'ok');
+      say('COMPLETE — ' + String(obj.outcome || '').toUpperCase());
+      return;
+    }
 
     if (obj && obj.__plan__){
       buildStrip(obj.__plan__);
@@ -1915,7 +2088,8 @@ body{
     L.base = 0; L.pulses = []; L.frozen = false; L.ceiling = 0;
     resetPSteps(); stopHoldTimer(); $('keyTimer').textContent = '0:00';
     proofRows = []; proofReady = false; setTab('log');
-    setLamp(el.armed, true); setLamp(el.hold, false); setLamp(el.block, false);
+    setLamp(el.armed, true); setLamp(el.hold, false); setLamp(el.block, false); setLamp(el.hardBlock, false);
+    $('policyPanel').classList.remove('on'); $('vcard').classList.remove('on');
     el.ceilTag.classList.remove('hot');
     el.keyhole.classList.remove('armed', 'turned'); el.keycell.classList.remove('armed');
     el.keyLabel.textContent = 'NO PENDING APPROVAL';
@@ -1949,10 +2123,57 @@ body{
     };
   }
 
+  /* ───────── v3 dev/screenshot path — scripts/fake_stream.py ─────────
+     `?fake=blocked|held|approved|scopebreach|clean` on the page URL drives
+     the exact same SSE endpoint and the exact same handleEvent() code path
+     as a real run, just against replayed contract frames. Not wired to any
+     panel control on purpose — this is a testing tool, not a demo feature. */
+  function startFakeRun(scenario){
+    if (running) return;
+    running = true; setControlsEnabled(false);
+    const laneKey = 'B', L = B;
+    activeLaneKey = laneKey;
+    L.base = 0; L.pulses = []; L.frozen = false; L.ceiling = 0;
+    resetPSteps(); stopHoldTimer(); $('keyTimer').textContent = '0:00';
+    proofRows = []; proofReady = false; setTab('log');
+    setLamp(el.armed, true); setLamp(el.hold, false); setLamp(el.block, false); setLamp(el.hardBlock, false);
+    $('policyPanel').classList.remove('on'); $('vcard').classList.remove('on');
+    el.ceilTag.classList.remove('hot');
+    el.keyhole.classList.remove('armed', 'turned'); el.keycell.classList.remove('armed');
+    el.keyLabel.textContent = 'NO PENDING APPROVAL';
+    el.keySub.textContent = 'a human approves at platform.armoriq.ai — this dial only watches';
+    say(`FAKE STREAM · ${scenario.toUpperCase()}`);
+    log(`> fake_stream --scenario ${scenario}`);
+
+    const src = new EventSource(`/api/run?fake=${encodeURIComponent(scenario)}`);
+    src.onmessage = e => {
+      if (e.data === '__END__'){
+        src.close();
+        running = false; setControlsEnabled(true);
+        activeLaneKey = null;
+        setLamp(el.armed, false);
+        renderProof();
+        return;
+      }
+      handleEvent(e.data, laneKey, L);
+    };
+    src.onerror = () => {
+      src.close();
+      running = false; setControlsEnabled(true);
+      activeLaneKey = null;
+      setLamp(el.armed, false);
+      say('CONNECTION LOST');
+      log('connection to panel server lost', 'err');
+    };
+  }
+
   $('runBtn').addEventListener('click', startRun);
   applyPreset('BASELINE');
   $('preset').querySelector('.val').textContent = 'BASELINE';
   syncCardTextVisibility();
+
+  const fakeScenario = new URLSearchParams(location.search).get('fake');
+  if (fakeScenario) startFakeRun(fakeScenario);
 
   refreshState();
 })();

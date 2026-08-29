@@ -854,3 +854,68 @@ disabled — real bug was two layers deeper, found by testing with curl against 
         render plain, `done` renders green, no false errors.
 - [x] Cleaned up all stray processes and stale session state as part of this fix; current panel
       server instance is the only one running, `.session.json` reflects its real, live registration.
+
+## v3 — severity layer, generated plans, delegation, the ghost (docs/v3.md)
+Scope split: HA owns severity engine / policy generation / planner / delegation
+(`docs/implementation-HA.md`); this session owns the panel rework and the SSE frame layer
+(`docs/implementation-GN.md`). `CONTRACT.md` was never committed — `docs/implementation-HA.md` §1
+already specifies the frame shapes verbatim (same content GN's Phase 0 expects to read), so that
+section was treated as the frozen contract rather than waiting on a separate commit.
+
+### Batch 18 — GN Phase 0 (fake emitter) + Phase 1 (verdicts, derivations, generated policy)
+- [x] **`scripts/fake_stream.py`** — new. `--scenario clean|blocked|held|approved|scopebreach`
+      replays hand-written frames in the exact shapes from `docs/implementation-HA.md` §1
+      (`__plan__`, `__verdict__`, `__step__`, `__hold__`, `__resume__`, `__state__`, `__END__`),
+      one JSON line per `print()`, at realistic pauses (0.15–1.2s). Not throwaway — this is the
+      panel's regression harness and screenshot tool until HA's severity engine ships, and the
+      documented fallback if his backend is unstable at demo time. `blocked` covers the
+      `delete_rows` BLOCK_HARD case verbatim from the v3.md §2.8 example; `held` covers a
+      production promotion held then approved; `approved` covers closer A (production
+      pre-authorized, straight through, no hold); `scopebreach` covers the evaluator delegate
+      reaching for a crew-authorized-but-not-delegate-authorized `promote_model`.
+- [x] **`panel/server.py`**: `/api/run?fake=<scenario>` spawns `scripts/fake_stream.py` instead of
+      `agent.main`, reusing the exact same SSE plumbing (extracted the subprocess-streaming loop
+      into `_stream_subprocess()` so the real and fake paths share one implementation). No DB
+      seed, no infra check, no `cfg` parsing on this path — deliberately bypassed, this is a dev
+      tool, not a run mode.
+- [x] **`panel/index.html` — v3 verdict rendering, additive, does not touch the existing real-run
+      path.** New frames are dispatched by a top-level `type` field (`__plan__`, `__verdict__`,
+      `__step__`, `__hold__`, `__resume__`, `__state__`, `__END__`) in `handleEvent()`, checked
+      *before* the old shape checks (nested `__plan__`, lowercase `verdict`) — today's real
+      `agent.main` only ever emits the old shape, so nothing here fires against a real run yet and
+      the working guarded/unguarded demo is unaffected.
+      - All five verdicts render: `ALLOW`→in-flight amber then green on `__step__`, `HOLD`→amber +
+        key dial arms + timer, `BLOCK`/`SCOPEBREACH`→red, `BLOCK_HARD`→red **plus** its own
+        `NO APPROVAL PATH` annunciator lamp (new, next to BLOCK) and a small badge on the plan-strip
+        cell — a different lamp entirely, not a label on the same one, per the "must be visibly a
+        different category" requirement.
+      - `derivation` arrays print verbatim as sentences in three places: the console (one line per
+        sentence), a new dedicated `.vcard` derivation card under the plan strip (latest verdict,
+        colour-coded by category), and reused in the existing hover-tooltip pattern via the same
+        data the plan-strip cell carries.
+      - `generated_policy` from `__plan__` renders in a new small monospace `.policy` panel below
+        the plan strip — hidden when the field is absent (old real `__plan__` frames never carry
+        it, so this stays invisible against the current backend, no behaviour change there).
+      - `SCOPEBREACH` shows the delegate name inline (`EVALUATOR ONLY`); `NOTED` renders `.done`
+        with a dim `NOTED` flag, matching "ships disabled, render as allowed+logged if it ever
+        appears."
+      - Dev/test entry point: `?fake=<scenario>` on the page URL drives a real `EventSource` against
+        `/api/run?fake=...` through the exact same `handleEvent()` code every real run uses —
+        deliberately not wired to any visible panel control, this is a testing tool.
+- [x] **Verified live in a real browser**, not just curl: `?fake=blocked` — 4 green ALLOW steps,
+      `delete_rows` lands in the trailing slot tagged `NO APPROVAL PATH` in red, the `NO APPROVAL`
+      lamp lights (distinct from `BLOCK`), console shows the exact 4-line derivation from v3.md
+      §2.8, generated policy panel renders. `?fake=held` — reads flow, production promotion pulses
+      amber with its 3-line authority-delta derivation, key dial arms and times, then resumes and
+      turns to `APPROVED · approved by approver@example.com`. `?fake=scopebreach` — the evaluator's
+      in-plan `promote_model:staging` step itself (not the trailing slot) turns red with an
+      `EVALUATOR ONLY` badge and the "authorized for the crew, not for this delegate" derivation.
+      No JS errors, no layout breakage in any of the three.
+- [x] Orphaned-process cleanup done again before this test (8 stray python.exe from earlier
+      sessions, two of them bound to port 8080 with stale server code) — same class of bug as
+      Batch 17, force-kill during iteration is what causes it. One clean `panel.server --no-infra`
+      instance left running at the end of this batch for continued local testing.
+- [ ] GN Phase 2 (ARM surface + editable plan) not started — next.
+- [ ] HA's Phase 0 (`delegate()` verification) and Phase 1 (manifest + severity engine + policy
+      generation) status unknown from this session — coordinate before wiring the fake-only
+      rendering above against his real output.
