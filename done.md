@@ -814,3 +814,43 @@ Two small final polish items.
       button ends up living in a future revision, and it also re-runs on window resize while open.
       Verified live with exact geometry, not just a screenshot: `gapAboveButton: 10px`,
       `rightEdgeDiff: 0px`.
+
+## Batch 17 — guarded mode was genuinely broken; found the real cause, fixed two separate bugs
+User reported "guarded button not working" and "it's locked." The toggle itself was never
+disabled — real bug was two layers deeper, found by testing with curl against `/api/run` directly
+(bypassing the browser) so the backend's own behavior couldn't hide behind the UI.
+
+- [x] **Root cause of the guarded failure: orphaned duplicate processes, not a code bug.**
+      Every time the panel server got force-killed during this session's testing, its child
+      `mcp_servers.app` + `cloudflared` processes survived (force-kill skips the `atexit`/`finally`
+      cleanup `agent/infra.py` relies on). Found **6 leftover processes** stacked up — two MCP
+      origins, two tunnels, two panel servers, all still bound to the ports. The MCP origin
+      actually answering requests was running an *old* `MCP_SHARED_SECRET`, while ArmorIQ had the
+      *newest* one registered against the current `.session.json` — permanent mismatch, so every
+      `invoke()` failed with `InvalidTokenException: missing or invalid x-api-key`, no matter how
+      many times the run was retried. **No code in `armoriq_client.py` needed to change** — killed
+      the orphans, cleared the stale `.session.json`, one clean `bring_up()` registers a secret and
+      starts the origin with that same secret in the same call, consistent by construction.
+      Verified with a real guarded run, not just a successful plan signature: all 5 steps came back
+      `executed`, and `/api/state` showed the real promotion
+      (`{"model_hash":"cand-v7-8f3a2b","stage":"staging",...}`) actually landed in the registry.
+- [x] **Real UI bug, fixed in `panel/index.html`'s `handleEvent()`**: any stdout line from
+      `agent.main` that didn't match a known prefix (`run_id=`, `BLOCKED:`, `NOT APPROVED:`,
+      `ERROR:`, `done`) was silently dropped. A real crash — like the `InvalidTokenException`
+      traceback above — produced exactly zero visible feedback: RUN just quietly re-enabled with
+      no error anywhere. That's almost certainly why "guarded" read as "locked/not working" instead
+      of "guarded ran and failed." Fixed:
+      - Any unrecognized line now logs to the console as an error line instead of vanishing.
+      - `__final_state__` now checks `exit_code` and surfaces `RUN FAILED — agent exited N` when
+        the subprocess didn't exit clean.
+      - **Caught and fixed a real regression in my own fix before shipping it**: `agent.main` prints
+        the model's closing message with one Python `print()`, but when that message is markdown
+        with embedded newlines, the server forwards it as several separate stdout lines — only the
+        first starts with `agent final message:`. The naive version of this fix mislabeled every
+        continuation line as an error (caught live: a run's bullet-point summary rendered as five
+        red error lines). Fixed with an `inFinalMessage` flag that treats lines between
+        `agent final message:` and `done` as plain continuation text, reset at the start of every
+        new run. Verified against two more real runs after the fix — single-line final messages
+        render plain, `done` renders green, no false errors.
+- [x] Cleaned up all stray processes and stale session state as part of this fix; current panel
+      server instance is the only one running, `.session.json` reflects its real, live registration.
