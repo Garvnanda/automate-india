@@ -198,7 +198,7 @@ class Handler(BaseHTTPRequestHandler):
         it's missing — the panel just says so, honestly, same as v1's rule."""
         if not GHOST_TRACE_PATH.exists():
             return self._json({"error": "no unguarded trace recorded yet"}, status=404)
-        frames, run_id = [], None
+        header, frames = None, []
         for line in GHOST_TRACE_PATH.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
@@ -207,9 +207,16 @@ class Handler(BaseHTTPRequestHandler):
                 f = json.loads(line)
             except ValueError:
                 continue
+            if f.get("type") == "__trace__" and header is None:
+                header = f  # CONTRACT.md §7.7 — line 1, metadata for the RECORDED label
+                continue
             frames.append(f)
-            run_id = run_id or f.get("run_id")
-        return self._json({"frames": frames, "path": "evidence/unguarded_trace.jsonl", "run_id": run_id})
+        return self._json({
+            "frames": frames, "path": "evidence/unguarded_trace.jsonl",
+            "run_id": (header or {}).get("run_id"),
+            "recorded_at": (header or {}).get("recorded_at"),
+            "violation": (header or {}).get("violation"),
+        })
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -229,9 +236,16 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(length) or b"{}")
+                # switches (authorized/promote_production), a typed goal, or a
+                # panel-edited plan round-tripping back — plan_preview picks
+                # whichever the body actually carries, plan first, then goal
                 frame = plan_preview.build_plan_frame(
-                    body.get("authorized") or [], bool(body.get("promote_production")),
-                    body.get("agent_role") or "operator")
+                    authorized=body.get("authorized") or [],
+                    promote_production=bool(body.get("promote_production")),
+                    agent_role=body.get("agent_role") or "operator",
+                    goal=body.get("goal") or None,
+                    plan=body.get("plan") or None,
+                )
             except (ValueError, TypeError, KeyError) as e:
                 return self._json({"error": f"bad draft plan — {e}"}, status=400)
             return self._json(frame)
@@ -272,7 +286,15 @@ class Handler(BaseHTTPRequestHandler):
             self._sse("__END__")
             return
 
-        if not cfg.plans_anything:
+        # CONTRACT.md §7.6 — the ARM surface's typed goal or a panel-edited
+        # plan, forwarded verbatim; agent.main re-validates either before it
+        # can be signed. --plan wins if both are somehow present (matches
+        # resolve_plan()'s own precedence). Either one replaces the switches
+        # as the source of *steps* — cfg still carries agent_role and Bank B.
+        plan_json = (query.get("plan") or [None])[0]
+        goal = (query.get("goal") or [None])[0]
+
+        if not (plan_json or goal) and not cfg.plans_anything:
             self._sse("ERROR: nothing authorized — the plan would be empty")
             self._sse("__END__")
             return
@@ -286,6 +308,10 @@ class Handler(BaseHTTPRequestHandler):
             args += ["--force-violation", violation]
         if mode == "guarded" and violation == "2":
             args += ["--hold-timeout", (query.get("holdTimeout") or ["600"])[0]]
+        if plan_json:
+            args += ["--plan", plan_json]
+        elif goal:
+            args += ["--goal", goal]
 
         self._stream_subprocess(args)
 

@@ -1,62 +1,66 @@
 """GN Phase 2 — live plan preview for the ARM/REVIEW surface.
 
-Not the real ArmorIQ signing path. Every frame this returns carries
-`"dev_preview": true` so the client can (and must) label it honestly —
-v1's rule survives into v3: nothing on the panel pretends to be more real
-than it is. This exists so the editable-plan surface has something to show
-live, before HA's real planner/severity engine lands (docs/implementation-
-GN.md Phase 2: "Independent of HA's planner — build against a static draft
-plan JSON").
+Was a dev stand-in (panel/manifest_stub.py) until HA's severity engine and
+planner landed for real; now a thin wrapper over his actual functions —
+`agent.severity`, `agent.policy_gen`, `agent.planner`, `agent.plan` — so the
+preview can never disagree with what a real run signs. Nothing here
+recomputes a dependency or a verdict; it calls the real ones and packages
+the result.
+
+Still not the real ArmorIQ signature — there is no network call here, no
+capture_plan(), no token. Every frame carries `"dev_preview": true` and the
+policy text says so too, so it can't get mistaken for the real signing beat
+even if it reaches the same rendering code.
 """
 
 import hashlib
 import json
 
-from panel.manifest_stub import ACTION_MANIFEST, ARGS_BY_ACTION, ORDER, authority_delta, edges_for, evidence_base_for, required_role
-
-GENERATED_POLICY = """package promotionguard
-
-allow[i] { input.step == i; input.action == data.plan.steps[i].action }
-hold { input.axes.authority_delta > 0 }
-block_hard { input.axes.reversibility == "irreversible"; input.axes.blast_radius == "tampering" }"""
-
-
-def _step(action, args):
-    m = ACTION_MANIFEST[action]
-    return {"mcp": m["mcp"], "action": action, "args": args,
-            "reads": m["reads"], "writes": m["writes"], "required_role": required_role(action, args)}
+from agent.config import CANDIDATE_HASH, EVAL_SPLIT
+from agent.plan import PLAN_GOAL, build_plan
+from agent.planner import PlanInvalid, generate as generate_plan, normalize, validate
+from agent.policy_gen import generate as generate_policy
+from agent.runconfig import RunConfig
+from agent.severity import annotate_steps, authority_delta, evidence_base, load_manifest, plan_edges
 
 
-def build_plan_frame(authorized, promote_production, agent_role):
-    """`authorized`: list of action names (Bank A). `promote_production`:
-    whether a stage=production promote_model step is also in the draft.
-    `agent_role`: reader | operator | release_manager. Mirrors
-    agent/plan.py's build_plan() assembly rules exactly, so the preview
-    never disagrees with what a real run would actually sign."""
-    authorized = set(authorized or [])
+def _resolve_plan(authorized, promote_production, agent_role, goal, plan):
+    """One plan dict, however the caller specified it — switches, a typed
+    goal, or a panel-edited draft round-tripping back. Returns
+    (plan, planner_fallback)."""
+    if plan is not None:
+        return validate(normalize(plan)), False
+    if goal:
+        return generate_plan(goal)
+    cfg = RunConfig(authorized=authorized or [], promote_production=bool(promote_production),
+                     agent_role=agent_role or "operator")
+    return build_plan(None, cfg), False
+
+
+def build_plan_frame(authorized=None, promote_production=False, agent_role="operator",
+                      goal=None, plan=None):
+    agent_role = agent_role or "operator"
+    resolved, fallback = _resolve_plan(authorized, promote_production, agent_role, goal, plan)
+    manifest = load_manifest()
+    ann = annotate_steps(resolved, manifest)
     steps = []
-    for name in ORDER:
-        if name not in authorized:
-            continue
-        steps.append(_step(name, dict(ARGS_BY_ACTION[name])))
-        if name == "promote_model" and promote_production:
-            steps.append(_step(name, {**ARGS_BY_ACTION[name], "stage": "production"}))
-    if promote_production and "promote_model" not in authorized:
-        steps.append(_step("promote_model", {**ARGS_BY_ACTION["promote_model"], "stage": "production"}))
-    if "delete_rows" in authorized:
-        steps.append(_step("delete_rows", dict(ARGS_BY_ACTION["delete_rows"])))
+    for st, a in zip(resolved["steps"], ann):
+        steps.append({**a, "args": a["params"],
+                      "authority_delta": authority_delta(a["mcp"], a["action"], a["params"],
+                                                          manifest, agent_role)})
 
-    digest = hashlib.sha256(json.dumps(steps, sort_keys=True).encode()).hexdigest()[:16]
-    for i, st in enumerate(steps):
-        st["i"] = i
-        st["authority_delta"] = authority_delta(st["action"], st["args"], agent_role)
+    digest = hashlib.sha256(json.dumps(resolved["steps"], sort_keys=True).encode()).hexdigest()[:16]
+    policy = generate_policy(resolved, agent_role, manifest)
 
     return {
         "type": "__plan__", "dev_preview": True,
         "plan_hash": digest, "merkle_root": None,
-        "goal": "evaluate the candidate and promote if it clears the bar",
-        "bindings": {"dataset": "eval_v3", "model": ARGS_BY_ACTION["launch_run"]["model_hash"]},
+        "goal": resolved.get("goal") or goal or PLAN_GOAL,
+        "bindings": {"dataset": EVAL_SPLIT, "model": CANDIDATE_HASH},
         "agent_role": agent_role,
-        "steps": steps, "edges": edges_for(steps), "evidence_base": evidence_base_for(steps),
-        "generated_policy": GENERATED_POLICY + f"\n# preview hash {digest} — recomputed live, not ArmorIQ's signature",
+        "steps": steps, "edges": plan_edges(resolved, manifest),
+        "evidence_base": sorted(evidence_base(resolved, manifest)),
+        "generated_policy": policy["text"] +
+            f"\n# preview hash {digest} — recomputed live, not ArmorIQ's signature",
+        "planner_fallback": bool(fallback),
     }

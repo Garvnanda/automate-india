@@ -1223,3 +1223,136 @@ Triggered by `tests/verify_guarded.py` failing on the user's machine with
       upstream outage sends you debugging the wrong system.
 - [x] **Suite green again after both fixes**, with the LLM provider still down — which is the point:
       `happy path OK · violation 1 OK · violation 2 OK · ALL CHECKS PASSED`.
+### Batch 21 — HA's real backend landed; rewired against it, finished GN's plan through Phase 5
+User added HA's files through his own Phase 4 (severity engine, planner, policy_gen, manifest,
+`CONTRACT.md`, a real `evidence/unguarded_trace.jsonl`) and asked to complete Phase 0–4, then
+Phase 5 and 6, testing throughout. `CONTRACT.md` (his committed, frozen contract — corrects both
+implementation docs) was read first and treated as authoritative over anything assumed earlier
+this session.
+
+- [x] **CONTRACT.md read in full; two things in it change what gets built:**
+      1. **Phase 6 (delegation rings / SCOPEBREACH) is struck, verified not assumed** — CONTRACT.md
+         §5: `client.delegate_subtree()` was tested live against the real platform 2026-08-29 and
+         **confinement does not hold** — a delegate scoped to one step successfully called an
+         unrelated tool; the subtree headers are accepted and ignored server-side. "GN does not
+         build delegation rings. That phase never existed." Removed the `scopebreach` scenario from
+         `scripts/fake_stream.py` and the `SCOPEBREACH` verdict from `V3_CLASS`/`V3_CAT` (falls
+         through to `.bad`/`err` harmlessly if it were ever emitted, which per the real verdict
+         enum — `ALLOW|HOLD|BLOCK|BLOCK_HARD|NOTED` — it now never is). **Not doing Phase 6, and
+         this is a verified platform limitation, not a scope cut.**
+      2. **Frame shapes matched what was already built almost exactly** — type-keyed, `ALLOW`
+         verdicts on in-plan calls too, `merkle_root` always null, unguarded keeps the old nested
+         `__plan__`. The one real gap: `--goal`/`--plan`/`agent_role` are real CLI flags on
+         `agent.main` now (§7.6) — Phase 2 needed rewiring to use them for real, not just preview.
+- [x] **Retired `panel/manifest_stub.py` and `panel/plan_preview.py`'s mock entirely.** Both were
+      GN-side stand-ins for a severity engine that didn't exist yet; now that
+      `agent.severity`/`agent.policy_gen`/`agent.planner`/`agent.plan` are real, `plan_preview.py`
+      is a thin wrapper calling them directly — same functions a real run uses, just without the
+      network signing call. Deleted `manifest_stub.py` outright (nothing needs it any more).
+      `/api/plan/preview` now accepts switches, a typed `goal`, or a panel-edited `plan`, and calls
+      the real planner/severity/policy_gen for whichever was given.
+- [x] **Phase 2 finished for real: a GOAL field, wired to `agent.planner.generate()`.** Typed goal +
+      GENERATE button in the ARM surface; a non-empty goal overrides the AUTHORIZE switches on RUN
+      (`--goal` forwarded to `agent.main`, which re-validates before signing). `refreshArm()`'s
+      empty-plan guard and `startRun()`'s guard both updated so a goal-only plan isn't blocked as
+      "nothing authorized." **Verified live via curl against the real planner** (not mocked): typed
+      "evaluate the candidate and promote it to production if it clears the bar" →
+      `read_split, launch_run, get_run_status, read_metrics, promote_model:production` (the model's
+      own tool choice — used `get_run_status` instead of `get_dataset_card`, genuinely emergent, not
+      a template) — `planner_fallback: false` (validated clean first try), `promote_model` correctly
+      flagged as a HOLD at `operator`. Real network call, ~20–40s round trip through OpenRouter.
+      **`PLANNER FALLBACK` lamp added** (a badge on the plan-strip label, not a 5th bezel lamp — the
+      row was already crowded) — lights from `__plan__.planner_fallback`, per CONTRACT.md §7.6's own
+      honesty requirement.
+- [x] **Found and fixed a real double-rendering bug the real backend's frames exposed.**
+      CONTRACT.md's additive rule keeps `agent/logging.py`'s old JSONL audit line
+      (`{ts,mode,step,action,mcp,params,verdict,reason}`, lowercase verdict) flowing on stdout
+      *alongside* the new `__verdict__`/`__step__`/`__state__` frames for the *same call* — true for
+      every real run now, guarded and unguarded. The panel's old v1/v2 handler
+      (`if (obj && obj.verdict)`) was still fully wired to pulse the scope, paint the plan strip,
+      drive the hold lamp/timer and push a PROOF row — meaning every real call was being rendered
+      **twice**, once by each handler, in two different verdict vocabularies (`executed`/`held` vs
+      `ALLOW`/`HOLD`), racing on the same DOM. Not visible against `fake_stream.py` (which never
+      emits the old shape), so nothing this session had caught it until a real run did.
+      **Fixed:** the old branch now only fires when the line carries `.verdict` and *no* `.type` —
+      true only for the genuine old JSONL line — and does nothing but log it as plain reference
+      text. `updatePlan()`/`findStepIndex()` (the v2 functions this used to call) had no remaining
+      callers and were deleted rather than left dead.
+      **Verified with a real guarded `--force-violation 1` run against the live ArmorIQ platform**
+      (session brought up fresh, `.session.json` confirmed alive first): console log showed every
+      action exactly once per source (`get_dataset_card ALLOW` / `get_dataset_card executed` /
+      `get_dataset_card: 401 chars read` — three genuinely different facts, not duplicates), the
+      plan strip painted cleanly with no flicker, and PROOF showed exactly 6 rows for 6 real calls,
+      not 12.
+- [x] **The real ghost, against the real trace, during a real guarded run — Phase 4's actual gate,
+      verified for real, not against a throwaway fixture this time.** Ran `--guarded
+      --force-violation 1` live: the ghost lane read `evidence/unguarded_trace.jsonl` (the real file
+      HA's `scripts/record_unguarded.py` produced), showed `RECORDED · UNGUARDED · ddc4ec6e9281 ·
+      2026-08-29T07:36:18Z · evidence/unguarded_trace.jsonl`, and settled at **60 rows** while the
+      live guarded gauge held **100** — the actual fork the ghost exists to show, driven by a real
+      recorded run and a real live one, not two mocks.
+      **Found and fixed a real sync bug doing this.** The ghost's advance function stopped exactly
+      *at* each `__step__` frame, deferring that step's own trailing `__state__` (which carries the
+      actual gauge value) to the *next* live event. For most steps this just meant a one-beat lag;
+      for the *last* live event before a real `BLOCK_HARD` run exits — which is exactly when the
+      guarded process terminates, with no further live events to trigger that final consume — the
+      ghost's gauge would never reach the fork it's supposed to show at all. Fixed: `advanceGhost()`
+      now drains every trailing non-boundary frame (the `__state__` right after a `__step__`) into
+      the *same* call that resolved the boundary, so the divergence lands on the correct beat.
+      Traced by hand against the real 16-line trace file before touching the fix, then confirmed via
+      the live run above.
+      Also fixed: a real `__step__` frame carries no `action` field (only `call_id`/`step_index`/
+      `status`/`result_summary`) — the ghost's pulse coloring was reading `f.action` (always
+      undefined for a real trace) and rendering every pulse the same neutral grey. Now parses the
+      action off `result_summary`'s own `"{action}: ..."` shape, which `agent/main.py`'s
+      `_summarize()` always produces.
+      Also fixed: the `RECORDED` label now includes the real `recorded_at` timestamp
+      (`/api/ghost_trace` extracts it from the trace's `__trace__` header line, per CONTRACT.md
+      §7.7) — matching v3.md §5.4's exact required label shape, which the throwaway-fixture version
+      from Batch 20 didn't yet carry.
+- [x] **Phase 5 — PROOF surface rebuilt against real fields.** `plan_hash → step_proof → verdict →
+      derivation` per call, click a row to expand its full derivation inline (the "traced in two
+      clicks" gate). `delegation_hash` dropped from the table — struck per CONTRACT.md §5, was
+      always null. **Verified against the real run above**: real step_proof values (Merkle proof
+      JSON, truncated) on every ALLOW row, `—` on the `BLOCK_HARD` row (no proof exists for a call
+      never in the plan — `_step_proof()`'s own documented behavior, correctly reflected rather than
+      papered over), real derivation expanding on click.
+- [x] `scripts/fake_stream.py` updated to match reality now that it exists to compare against:
+      resource names switched from invented ones (`metrics`) to the real manifest's
+      (`models`/`runs`/`promotions`/`labels`/`dataset_card`), `merkle_root` always `null`, the
+      `blocked` scenario now **ends at `delete_rows`** instead of continuing on to a `promote_model`
+      that a real BLOCK_HARD run would never reach (the real backend exits the process there).
+      Re-verified all 4 remaining scenarios (`clean`/`blocked`/`held`/`approved`) after every change
+      — still render correctly, no regressions.
+- [x] Cleaned up orphaned processes and a stale `.session.json` (dead tunnel, confirmed via a 502
+      before touching anything) before the real guarded test — same discipline as Batch 17/18. One
+      clean session, freshly registered, currently running.
+- [ ] Not independently tested this session: a real HOLD → dashboard-approve → resume cycle through
+      the new ghost/graph/PROOF surfaces together (would need clicking Approve on the live ArmorIQ
+      dashboard for real; the mechanism itself was proven repeatedly earlier in this project's
+      history, and Batch 20's fake-scenario test already covers the ghost's freeze-at-hold behavior
+      in isolation). Worth one live pass before the actual demo.
+- [x] **The live HOLD → dashboard-approve → resume cycle, done for real, on user request.**
+      Real `--guarded --force-violation 2` run: held for real (delegation
+      `e83f9ddd-d060-4ab1-bbb4-310c73bc4bf1`), approved for real at
+      `platform.armoriq.ai → Intent → Held Actions` by `garvnanda326@gmail.com` (a login the user
+      did themselves in a tab I opened — I never touched the password field, per the standing rule
+      against entering credentials even with permission), watched it resume and finish through the
+      panel: key dial turned gold, `APPROVED · approved by garvnanda326@gmail.com`, `PROD
+      PROMOTIONS` went 0 → 1, console showed `promote_model executed` / `promote_model: promoted to
+      production` / `run complete — outcome held_then_approved`. Real production row landed.
+      One dashboard hiccup, not a bug in this repo: the "Needs you" list showed 0 until the page was
+      reloaded — a caching/websocket lag on ArmorIQ's side, not this panel's.
+      **Found and fixed one more real bug from this run**: the plan graph's node correctly turned
+      green on resume (`gnode done`) but its sub-label stayed frozen on `hold` — the `__step__`
+      handler updated the node's class but never its `.gsub` text. Fixed: sets the sub-label to
+      `executed` too. Confirmed via direct DOM read before and after (`graph4sub: "hold"` →
+      un-reproducible against `fake_stream.py`'s own `held` scenario, since that one deliberately
+      exercises the *out-of-plan* intruder path (`step_index: null`), not this *in-plan escalation*
+      path (`step_index: 4`, a real array index) — the two are different code paths and this bug
+      only existed on the second one. Re-ran `?fake=held` afterward purely as a regression check;
+      unaffected, still correct.
+- [x] `docs/implementation-GN.md` is now fully built through Phase 5, and Phase 4's actual gate —
+      "ghost stays synchronised through a full hold → dashboard approval → resume cycle" — is
+      verified for real, not just against `fake_stream.py`. Phase 6 will not be built — see
+      CONTRACT.md §5.
