@@ -549,6 +549,15 @@ body{
 .pchip.hold{color:var(--amber); border-color:rgba(242,168,29,.4);}
 .preview-hash{font-family:var(--mono); font-size:8px; color:#655c50; letter-spacing:.05em;}
 
+/* ── v3 Phase 4: the ghost run — permanently labelled, never mistaken for
+   live data (v3.md §5.4) ── */
+.ghostlabel{
+  font-family:var(--mono); font-size:6.5px; letter-spacing:.08em; color:#544b41;
+  text-align:center; margin-top:2px; min-height:8px;
+}
+.ghostlabel.on{color:#8a7c53;}
+.ghostlabel.off{color:var(--red); opacity:.7;}
+
 .cardtext{
   display:none; margin-top:8px; padding:10px 12px; border-radius:8px; flex:1 1 260px; min-width:220px;
   background:linear-gradient(178deg,#1c1814,#111010);
@@ -899,6 +908,7 @@ body{
       <canvas class="gauge" id="gaugeA" width="380" height="220"></canvas>
       <div class="readout"><b id="numA">—</b><em>VAL ROWS</em></div>
       <div class="subread"><span>PROD PROMOTIONS</span><b id="prodA">—</b></div>
+      <div class="ghostlabel" id="ghostLabel" data-tip="ghost"></div>
     </div>
     <div class="cell cellB" id="cellB" data-tip="cellB">
       <canvas class="gauge" id="gaugeB" width="380" height="220"></canvas>
@@ -1243,6 +1253,7 @@ body{
     el.tagB.classList.toggle('idle', !guardedMode);
     el.cellA.classList.toggle('idle', guardedMode);
     el.cellB.classList.toggle('idle', !guardedMode);
+    if (typeof renderGhostLabel === 'function') renderGhostLabel();
   }
 
   el.modeToggle.addEventListener('click', () => {
@@ -1299,6 +1310,7 @@ body{
     psteps.innerHTML = ''; stepEls = []; planSteps = []; intruderEl = null;
     $('sealTag').textContent = 'PLAN NOT SIGNED';
     $('planGraphSvg').innerHTML = '';
+    if (typeof resetGhost === 'function') resetGhost();
   }
   /* the agent only logs a step once it has a verdict — there is no "starting"
      event — so the step after a finished one is what is in flight */
@@ -1835,6 +1847,11 @@ body{
     graph: `<b>PLAN GRAPH</b>Same steps as the strip above, laid out left to right with their real
       resource dependencies drawn in brass. A dashed amber ring means the step touches the evidence
       the run is graded on. The trailing dashed slot is where anything outside the plan lands.`,
+    ghost: `<b>THE GHOST RUN</b>A recorded unguarded run, replayed here in lockstep with this guarded
+      one — one ghost step per real step this run resolves, never on a timer, so a hold that waits
+      on a real human freezes the ghost too. Permanently labelled RECORDED with the trace file path
+      — the moment that stops being true, everything else on this panel is suspect too. Press
+      <code>g</code> to hide it.`,
     guardbank: `<b>ENFORCEMENT</b>The one switch that changes whether any of this is checked. Same
       agent, same prompt, same tools either way.`,
     guard: () => guardedMode
@@ -1953,7 +1970,11 @@ body{
 
   function applyState(s){
     applyInfra(s.infra);
-    const lane = guardedMode ? 'B' : 'A';
+    // activeLaneKey (the run actually in flight, real or fake) wins over
+    // guardedMode — a fake dev-scenario run never touches the real toggle,
+    // so guardedMode alone would misroute its own end-of-run DB snapshot
+    // onto lane A and clobber whatever the ghost just drew there
+    const lane = activeLaneKey || (guardedMode ? 'B' : 'A');
     const prodCount = s.promotions.filter(p => p.stage === 'production').length;
     if (lane === 'A'){ gA.target = s.val_rows; el.numA.textContent = s.val_rows; el.prodA.textContent = prodCount; el.prodA.className = prodCount ? 'hot' : ''; }
     else { gB.target = s.val_rows; el.numB.textContent = s.val_rows; el.prodB.textContent = prodCount; el.prodB.className = prodCount ? 'warm' : ''; }
@@ -1981,6 +2002,85 @@ body{
 
   const STEP_COLOR = { get_dataset_card:'#8d8271', read_split:'#8d8271', launch_run:'#8d8271',
                        read_metrics:'#8d8271', promote_model:'#5ac476', delete_rows:'#f0703a' };
+
+  /* ───────── v3 Phase 4: the ghost run ─────────
+     A recorded unguarded trace replayed in lane A (dim, per paintIdleLanes())
+     while a live guarded run plays in lane B — synced on step index, never
+     wall clock (v3.md §5.3): the ghost only advances when the live run
+     itself resolves a step, so a hold that waits on a real human freezes the
+     ghost too instead of running away on its own clock.
+     Permanently labelled RECORDED with the trace file path (§5.4) — the
+     first thing on this panel that isn't live, so it never gets to look
+     otherwise. If evidence/unguarded_trace.jsonl doesn't exist yet (HA's
+     scripts/record_unguarded.py hasn't run), this says so plainly instead
+     of inventing a trace. */
+  let ghostFrames = [], ghostPtr = 0, ghostPath = null, ghostRunId = null, ghostOn = true;
+
+  async function loadGhost(){
+    try {
+      const r = await fetch('/api/ghost_trace');
+      if (!r.ok){ ghostFrames = []; renderGhostLabel(); return; }
+      const data = await r.json();
+      ghostFrames = data.frames || [];
+      ghostPtr = 0;
+      ghostPath = data.path || 'evidence/unguarded_trace.jsonl';
+      ghostRunId = data.run_id;
+      renderGhostLabel();
+    } catch (e) { ghostFrames = []; renderGhostLabel(); }
+  }
+  function renderGhostLabel(){
+    const lbl = $('ghostLabel');
+    if (!lbl) return;
+    // "is lane B the live one" — true for a real guarded run (toggle on) and
+    // for a dev fake-scenario run alike, unlike guardedMode which only the
+    // real toggle sets
+    const bLive = guardedMode || activeLaneKey === 'B';
+    if (!bLive){ lbl.textContent = ''; lbl.className = 'ghostlabel'; return; }
+    if (!ghostFrames.length){
+      lbl.textContent = 'no recorded unguarded trace yet';
+      lbl.className = 'ghostlabel';
+      return;
+    }
+    lbl.textContent = `RECORDED · UNGUARDED · ${ghostRunId || '?'} · ${ghostPath} (press g to hide)`;
+    lbl.className = 'ghostlabel on' + (ghostOn ? '' : ' off');
+  }
+  function resetGhost(){
+    ghostPtr = 0;
+    A.base = 0; A.pulses = [];
+    renderGhostLabel();
+  }
+  function ghostApplyFrame(f){
+    if (f.type === '__state__'){
+      gA.target = f.eval_rows; el.numA.textContent = f.eval_rows;
+      const prodCount = f.prod_promotions || 0;
+      el.prodA.textContent = prodCount; el.prodA.className = prodCount ? 'hot' : '';
+      return;
+    }
+    if (f.type === '__verdict__' || f.type === '__step__'){
+      const action = f.action || '';
+      const hard = f.verdict === 'BLOCK_HARD';
+      fire(A, hard ? 50 : 24, hard ? { decay:24 } : {});
+      mark(action, hard ? '#ff2f6b' : (STEP_COLOR[action] || '#8d8271'));
+    }
+  }
+  function advanceGhost(){
+    if (!ghostOn || !ghostFrames.length) return;
+    while (ghostPtr < ghostFrames.length){
+      const f = ghostFrames[ghostPtr++];
+      ghostApplyFrame(f);
+      if (f.type === '__step__') return;
+      if (f.type === '__verdict__' && f.verdict !== 'ALLOW') return; // out-of-plan calls resolve with no __step__ to follow
+    }
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'g' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    ghostOn = !ghostOn;
+    renderGhostLabel();
+    if (guardedMode) say(ghostOn ? 'GHOST LAYER ON' : 'GHOST LAYER HIDDEN');
+  });
+  loadGhost();
 
   let inFinalMessage = false; // see the "agent final message:" branch below
 
@@ -2146,6 +2246,10 @@ body{
     } else {
       say(`${o.action} ${o.verdict.toLowerCase()}`);
     }
+    // ALLOW resolves later via its own __step__ frame; anything else (a hold,
+    // a block, a scopebreach) is already resolved right here — advance the
+    // ghost in lockstep, one live resolution at a time, never on a timer
+    if (o.verdict !== 'ALLOW' && laneKey === 'B') advanceGhost();
   }
 
   function handleEvent(raw, laneKey, L){
@@ -2166,6 +2270,7 @@ body{
         if (g) g.setAttribute('class', 'gnode done');
       }
       log(obj.result_summary || `step ${obj.status}`, 'ok');
+      if (laneKey === 'B') advanceGhost();
       return;
     }
     if (obj && obj.type === '__hold__'){
@@ -2289,6 +2394,7 @@ body{
     const laneKey = guardedMode ? 'B' : 'A';
     const L = laneKey === 'A' ? A : B;
     activeLaneKey = laneKey;
+    renderGhostLabel();
     L.base = 0; L.pulses = []; L.frozen = false; L.ceiling = 0;
     resetPSteps(); stopHoldTimer(); $('keyTimer').textContent = '0:00';
     proofRows = []; proofReady = false; setTab('log');
@@ -2337,6 +2443,7 @@ body{
     running = true; setControlsEnabled(false);
     const laneKey = 'B', L = B;
     activeLaneKey = laneKey;
+    renderGhostLabel();
     L.base = 0; L.pulses = []; L.frozen = false; L.ceiling = 0;
     resetPSteps(); stopHoldTimer(); $('keyTimer').textContent = '0:00';
     proofRows = []; proofReady = false; setTab('log');
