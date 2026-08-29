@@ -54,7 +54,9 @@ from agent.config import (
 )
 from agent.logging import log_event
 from agent.plan import authorized_params
+from agent.policy_gen import generate as generate_policy
 from agent.runconfig import AUTHORITY_PARAMS
+from agent.severity import classify
 
 
 class ArmorGuard:
@@ -62,13 +64,28 @@ class ArmorGuard:
     every subsequent tool call through ArmorIQ before it reaches the real
     MCP server."""
 
-    def __init__(self, run_id, plan, llm_name="agent", hold_timeout=None):
+    def __init__(self, run_id, plan, llm_name="agent", hold_timeout=None,
+                 agent_role="operator", emit=None):
         self.run_id = run_id
         self.plan = plan
+        self.agent_role = agent_role
         self.hold_timeout = hold_timeout or DELEGATION_TIMEOUT_SECONDS
+        self.emit = emit or (lambda frame: None)
+        self._calls = 0
         self.client = ArmorIQClient(user_id=AGENT_EMAIL, agent_id=AGENT_ID)
+
+        # v3: the policy handed to ArmorIQ is derived from this plan, seconds
+        # ago, rather than hand-written before the event. Its text goes on
+        # screen at the signing beat.
+        self.policy = generate_policy(plan, agent_role)
+        self.generated_policy = self.policy["text"]
+
         captured = self.client.capture_plan(llm=llm_name, prompt=plan["goal"], plan=plan)
-        self.token = self.client.get_intent_token(captured, validity_seconds=3600)
+        self.token = self.client.get_intent_token(
+            captured,
+            policy={"allow": self.policy["allow"], "deny": self.policy["deny"]},
+            validity_seconds=3600,
+        )
         self.planned_actions = {s["action"] for s in plan.get("steps", [])}
 
     def call(self, mcp, action, params, step_index):
@@ -81,13 +98,40 @@ class ArmorGuard:
         delegation request a human would approve only for invoke() to reject
         it afterwards.
         """
+        self._calls += 1
+        call_id = f"c{self._calls}"
+
         if action not in self.planned_actions:
-            return self._call_direct(mcp, action, params, step_index)
+            verdict = self._judge(call_id, mcp, action, params, step_index)
+            if verdict["approvable"]:
+                # ponytail: an approved out-of-plan call still cannot execute —
+                # ArmorIQ refuses any action absent from the signed plan, and it
+                # should. Re-signing (client.reanchor) is the real path; not
+                # built, and not needed for any demo beat we have.
+                return self._call_with_delegation(
+                    mcp, action, params, step_index, verdict["derivation"][0], call_id)
+            return self._call_direct(mcp, action, params, step_index, call_id)
 
         escalation = self._escalation(action, params)
         if escalation:
-            return self._call_with_delegation(mcp, action, params, step_index, escalation)
-        return self._call_direct(mcp, action, params, step_index)
+            verdict = self._judge(call_id, mcp, action, params, step_index, reason=escalation)
+            if verdict["verdict"] != "ALLOW":
+                return self._call_with_delegation(
+                    mcp, action, params, step_index, escalation, call_id)
+            # the grant already covers these arguments — the plan was written
+            # narrower than the agent's authority, which is not an escalation
+        return self._call_direct(mcp, action, params, step_index, call_id)
+
+    def _judge(self, call_id, mcp, action, params, step_index, reason=None):
+        """Derive the verdict and publish its derivation. ArmorIQ still does the
+        enforcing — this decides what the deviation *costs*, and therefore who,
+        if anyone, is allowed to say yes."""
+        verdict = classify(mcp, action, params, self.plan, self.agent_role,
+                           plan_hash=self.token.plan_hash, reason=reason,
+                           step_index=step_index)
+        verdict["call_id"] = call_id
+        self.emit({"__verdict__": verdict})
+        return verdict
 
     def _escalation(self, action, params):
         """Reason string if this call asks for authority the signed plan does
@@ -104,7 +148,7 @@ class ArmorGuard:
                 )
         return None
 
-    def _call_direct(self, mcp, action, params, step_index):
+    def _call_direct(self, mcp, action, params, step_index, call_id=None):
         try:
             result = self.client.invoke(mcp, action, self.token, params, user_email=AGENT_EMAIL)
         except IntentMismatchException as e:
@@ -116,7 +160,7 @@ class ArmorGuard:
         log_event(self.run_id, "guarded", step_index, action, mcp, params, "executed", "")
         return result.result
 
-    def _call_with_delegation(self, mcp, action, params, step_index, reason):
+    def _call_with_delegation(self, mcp, action, params, step_index, reason, call_id=None):
         log_event(self.run_id, "guarded", step_index, action, mcp, params, "held", reason)
 
         delegation = self.client.create_delegation_request(

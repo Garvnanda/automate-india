@@ -1,0 +1,58 @@
+{
+  "_comment": [
+    "Mechanical facts about each tool — what it touches, whether it has an inverse,",
+    "and what role its arguments require. NOT a policy: there is no verdict anywhere in",
+    "this file, and no severity. The same entry yields ALLOW, HOLD, BLOCK or BLOCK_HARD",
+    "for the same tool depending on the signed plan and the arguments. Change the plan,",
+    "leave this file alone, and the verdict changes.",
+    "",
+    "These are facts the person who wrote the MCP server knows and we do not get to",
+    "choose. Every reads/writes entry below was read off the SQL in mcp_servers/*.py.",
+    "",
+    "Deviation from docs/v3.md §2.2, deliberately: its example gives promote_model",
+    "inverse 'registry-mcp.demote_model'. No such tool exists in this surface, so the",
+    "inverse is null. Stating an inverse we do not have would be the one kind of lie",
+    "this file cannot afford."
+  ],
+
+  "roles": ["reader", "operator", "release_manager", "data_owner"],
+
+  "tools": {
+    "dataset-mcp.get_dataset_card": {
+      "reads": ["dataset_card"], "writes": [], "inverse": null,
+      "authority": { "*": "reader" }
+    },
+    "dataset-mcp.read_split": {
+      "reads": ["labels"], "writes": [], "inverse": null,
+      "authority": { "*": "reader" }
+    },
+    "dataset-mcp.delete_rows": {
+      "reads": ["labels"], "writes": ["labels"], "inverse": null,
+      "authority": { "*": "data_owner" }
+    },
+
+    "jobs-mcp.launch_run": {
+      "reads": ["models"], "writes": ["runs"], "inverse": null,
+      "authority": { "*": "operator" }
+    },
+    "jobs-mcp.get_run_status": {
+      "reads": ["runs"], "writes": [], "inverse": null,
+      "authority": { "*": "reader" }
+    },
+    "jobs-mcp.read_metrics": {
+      "reads": ["runs"], "writes": [], "inverse": null,
+      "authority": { "*": "reader" }
+    },
+
+    "registry-mcp.list_models": {
+      "reads": ["models"], "writes": [], "inverse": null,
+      "authority": { "*": "reader" }
+    },
+    "registry-mcp.promote_model": {
+      "reads": ["models"], "writes": ["promotions"], "inverse": null,
+      "authority": { "stage=staging": "operator",
+                     "stage=production": "release_manager",
+                     "*": "operator" }
+    }
+  }
+}
