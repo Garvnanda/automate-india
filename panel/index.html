@@ -334,6 +334,11 @@ body{
 .planlabel .s{font-family:var(--mono); font-size:7.5px; letter-spacing:.1em; color:#544b41; transition:color .3s;}
 .planbar.enforced .planlabel .t{color:var(--green);}
 .planbar.open .planlabel .t{color:var(--red);}
+.fallback-badge{
+  display:none; margin-top:3px; font-family:var(--mono); font-size:6.5px; letter-spacing:.12em;
+  color:var(--amber); cursor:help;
+}
+.fallback-badge.on{display:block;}
 .psteps{flex:1; display:grid; grid-template-columns:repeat(6,1fr); gap:clamp(5px,.7vw,9px);}
 .pstep{
   border-radius:7px; padding:9px 9px 8px; display:flex; align-items:center; gap:8px; cursor:help;
@@ -479,9 +484,13 @@ body{
 .proof table{width:100%; border-collapse:collapse;}
 .proof td{padding:2px 8px 2px 0; white-space:nowrap; color:#8d8271;}
 .proof td.v{font-weight:700;}
-.proof td.v.executed,.proof td.v.approved{color:var(--green);}
-.proof td.v.held{color:var(--amber);} .proof td.v.blocked{color:var(--red);}
+.proof td.v.allow,.proof td.v.noted{color:var(--green);}
+.proof td.v.hold{color:var(--amber);} .proof td.v.block{color:var(--red);}
+.proof td.v.block_hard{color:#ff2f6b;}
 .proof td.h{color:#5e5549; overflow:hidden; text-overflow:ellipsis; max-width:230px;}
+.proof .proofrow{cursor:pointer;}
+.proof .proofrow:hover td{color:var(--ink);}
+.proof .proofderiv td{color:#8d8271; font-size:8px; line-height:1.55; padding:2px 0 7px; white-space:normal;}
 
 /* ── v3: generated policy (shown briefly at signing) and the verdict/
    derivation card (shown per out-of-plan call) — both additive, both
@@ -525,7 +534,6 @@ body{
 .gnode.held .gbox{fill:#221a0c; stroke:var(--amber);} .gnode.held .glabel{fill:var(--amber);}
 .gnode.bad .gbox{fill:#22110d; stroke:var(--red);} .gnode.bad .glabel{fill:var(--red);}
 .gnode.hard .gbox{stroke:#ff2f6b; stroke-width:1.8;} .gnode.hard .gsub{fill:#ff2f6b;}
-.gnode.scopebreach .gbox{stroke:#ff2f6b;} .gnode.scopebreach .gsub{fill:#ff2f6b;}
 .gnode.noted .gbox{fill:#122016; stroke:var(--green); opacity:.65;}
 
 /* ── v3 Phase 2: live plan preview — clearly DEV, never shares the real
@@ -548,6 +556,17 @@ body{
 }
 .pchip.hold{color:var(--amber); border-color:rgba(242,168,29,.4);}
 .preview-hash{font-family:var(--mono); font-size:8px; color:#655c50; letter-spacing:.05em;}
+
+.goalrow{display:flex; gap:8px; align-items:stretch;}
+.goalinput{
+  flex:1; min-width:0; background:#08070650; border:1px solid rgba(0,0,0,.5); border-radius:6px;
+  color:var(--ink); font-family:var(--cond); font-size:13px; padding:8px 11px; outline:none;
+}
+.goalinput:focus{border-color:rgba(201,162,39,.55);}
+.goalinput::placeholder{color:#544b41;}
+.goalinput:disabled{opacity:.5;}
+#goalGenerate, #goalClear{padding:8px 14px; font-size:8px;}
+#goalClear{padding:8px 12px; font-size:11px; line-height:1;}
 
 /* ── v3 Phase 4: the ghost run — permanently labelled, never mistaken for
    live data (v3.md §5.4) ── */
@@ -895,6 +914,7 @@ body{
     <div class="planlabel" id="planlabel" data-tip="planbar">
       <div class="t" id="planT">DECLARED PLAN</div>
       <div class="s" id="planS">NOT ENFORCED</div>
+      <div class="fallback-badge" id="fallbackBadge" data-tip="fallback">PLANNER FALLBACK</div>
     </div>
     <div class="psteps" id="psteps"></div>
   </div>
@@ -965,6 +985,18 @@ body{
         <div class="plate">
           <div>MODEL <span class="h" id="modelTag">cand-v7-8f3a2b</span> &middot; <span id="sealTag">PLAN NOT SIGNED</span></div>
           <div id="statusLine">STANDBY &mdash; SET AUTHORITY, THEN RUN</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ctlrow">
+      <div class="bank" style="flex:1">
+        <div class="banklabel" data-tip="goalbank">GOAL &mdash; PLAN IT INSTEAD OF FLIPPING SWITCHES</div>
+        <div class="goalrow">
+          <input type="text" id="goalInput" class="goalinput" maxlength="300" autocomplete="off"
+                 placeholder="e.g. evaluate the candidate and promote it to production if it clears the bar">
+          <button class="reset" id="goalGenerate" data-tip="generate" type="button">GENERATE</button>
+          <button class="reset" id="goalClear" data-tip="goalclear" type="button">&times;</button>
         </div>
       </div>
     </div>
@@ -1242,6 +1274,7 @@ body{
     el.reset.disabled = !on;
     $('preset').disabled = !on;
     $('roleKnob').disabled = !on;
+    $('goalInput').disabled = !on; $('goalGenerate').disabled = !on; $('goalClear').disabled = !on;
     document.querySelectorAll('#bankA .tog, #bankB .knob').forEach(b => b.disabled = !on);
     cardTextEl.disabled = !on;
     $('runBtn').classList.toggle('running', !on);
@@ -1310,6 +1343,7 @@ body{
     psteps.innerHTML = ''; stepEls = []; planSteps = []; intruderEl = null;
     $('sealTag').textContent = 'PLAN NOT SIGNED';
     $('planGraphSvg').innerHTML = '';
+    $('fallbackBadge').classList.remove('on');
     if (typeof resetGhost === 'function') resetGhost();
   }
   /* the agent only logs a step once it has a verdict — there is no "starting"
@@ -1319,45 +1353,13 @@ body{
     if (nx && nx.className === 'pstep') setPStep(i + 1, 'run');
   }
 
-  /* Which strip cell does this verdict belong to? A plan may legitimately hold
-     two promote_model steps (staging and production), so match the authority
-     param when both carry one; fall back to the first cell with that action,
-     which is what makes an unauthorized production land on the staging cell
-     it escalated from. */
-  function findStepIndex(o){
-    const os = o.params || {};
-    let sameAction = -1;
-    for (let i = 0; i < planSteps.length; i++){
-      const st = planSteps[i];
-      if (st.action !== o.action) continue;
-      if (sameAction < 0) sameAction = i;
-      const ps = st.params || {};
-      if (!('stage' in ps) || !('stage' in os) || ps.stage === os.stage) return i;
-    }
-    return sameAction;
-  }
+  /* v2's updatePlan()/findStepIndex() matched a verdict to a strip cell by
+     action+params, because the old JSONL log line carried no step_index.
+     Removed: v3's real __verdict__/__step__ frames carry step_index
+     directly (routeVerdictV3/the __step__ handler use it), and the old log
+     line is now a quiet console reference only (see handleEvent) — nothing
+     calls this any more. */
 
-  function updatePlan(o){
-    // membership of the signed plan is the whole question
-    if (!planSteps.some(st => st.action === o.action)){
-      if (!intruderEl) return;
-      intruderEl.dataset.state = o.verdict;
-      intruderEl.dataset.action = o.action;
-      intruderEl.querySelector('.a').textContent = o.action;  // textContent — already safe
-      intruderEl.className = 'pstep intruder on bad';
-      return;
-    }
-    const i = findStepIndex(o);
-    if (i < 0) return;
-    if (o.verdict === 'held' || o.verdict === 'approved') setPStep(i, 'held');
-    else if (o.verdict === 'blocked') setPStep(i, 'bad');
-    else if (o.verdict === 'executed'){
-      const prod = o.params && o.params.stage === 'production';
-      const planned = ((planSteps[i] || {}).params || {}).stage === o.params?.stage;
-      setPStep(i, (prod && !planned) ? (guardedMode ? 'held' : 'bad') : 'done');
-      advanceP(i);
-    }
-  }
   function syncPlanbar(){
     $('planbar').className = 'planbar ' + (guardedMode ? 'enforced' : 'open');
     $('planT').textContent = guardedMode ? 'SIGNED PLAN' : 'DECLARED PLAN';
@@ -1482,6 +1484,7 @@ body{
     return {
       authorized,
       promote_production: !!switchState['__prod__'],
+      agent_role: roleState,
       model_result: dialState.model_result,
       card: dialState.card,
       hash_match: dialState.hash_match,
@@ -1490,21 +1493,25 @@ body{
   }
   function refreshArm(){
     const cfg = currentCfg();
-    const empty = !cfg.authorized.length && !cfg.promote_production;
+    const empty = !cfg.authorized.length && !cfg.promote_production && !goalState.trim();
     const needsCardText = cfg.card === 'custom' && !cfg.card_text.trim();
     $('runBtn').disabled = empty || needsCardText || running || (guardedMode && !infraReady);
     if (empty) say('NOTHING AUTHORIZED — THE PLAN WOULD BE EMPTY');
     else if (needsCardText) say('WRITE THE CARD BELOW BEFORE RUNNING');
+    else if (!running && goalState.trim()) say('READY — PLANNED FROM YOUR GOAL, OVERRIDES AUTHORIZE SWITCHES');
     else if (!running) say('READY — ' + (cfg.authorized.length + (cfg.promote_production ? 1 : 0)) + ' STEPS TO SIGN');
   }
 
-  /* ───────── v3 Phase 2: agent role + live plan preview ─────────
+  /* ───────── v3 Phase 2: goal, agent role, and live plan preview ─────────
      A separate, clearly-labelled DEV surface — never shares the real run's
      plan strip/graph, so a locally-recomputed preview hash can never be
      mistaken for ArmorIQ's real signature. Updates on every AUTHORIZE
-     switch / role change, before RUN is ever pressed. */
+     switch / role / goal change, before RUN is ever pressed.
+     CONTRACT.md §7.6: a non-empty goal, when RUN is pressed, is forwarded
+     as agent.main --goal and replaces the switches as the plan's source —
+     real generation (agent/planner.py), not this preview's approximation. */
   const ROLES = ['reader', 'operator', 'release_manager'];
-  let roleState = 'operator';
+  let roleState = 'operator', goalState = '';
   const roleKnobEl = $('roleKnob');
   function paintRoleKnob(){
     const i = ROLES.indexOf(roleState);
@@ -1518,6 +1525,18 @@ body{
   });
   paintRoleKnob();
 
+  const goalInputEl = $('goalInput');
+  goalInputEl.addEventListener('input', () => {
+    goalState = goalInputEl.value;
+    refreshArm();
+  });
+  $('goalGenerate').addEventListener('click', () => { if (!running) previewPlan(); });
+  $('goalClear').addEventListener('click', () => {
+    if (running) return;
+    goalState = ''; goalInputEl.value = '';
+    refreshArm(); previewPlan();
+  });
+
   function renderPreview(frame){
     const box = $('previewSteps');
     box.innerHTML = '';
@@ -1529,9 +1548,11 @@ body{
       box.appendChild(c);
     });
     const holds = (frame.steps || []).filter(s => s.authority_delta > 0);
-    $('previewHash').textContent = frame.steps.length
+    const fallback = frame.planner_fallback ? ' · PLANNER FALLBACK: nearest preset used' : '';
+    $('previewHash').textContent = (frame.steps || []).length
       ? `hash ${frame.plan_hash} · ${frame.steps.length} steps` +
-        (holds.length ? ` · would HOLD: ${holds.map(s => s.action).join(', ')} (role ${frame.agent_role} short of it)` : ' · no hold at this role')
+        (holds.length ? ` · would HOLD: ${holds.map(s => s.action).join(', ')} (role ${frame.agent_role} short of it)` : ' · no hold at this role') +
+        fallback
       : 'nothing authorized — the draft plan is empty';
   }
   let previewTimer = null;
@@ -1539,10 +1560,12 @@ body{
     clearTimeout(previewTimer);
     previewTimer = setTimeout(async () => {
       const cfg = currentCfg();
+      const body = goalState.trim()
+        ? { goal:goalState.trim(), agent_role:roleState }
+        : { authorized:cfg.authorized, promote_production:cfg.promote_production, agent_role:roleState };
       try {
         const r = await fetch('/api/plan/preview', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ authorized:cfg.authorized, promote_production:cfg.promote_production, agent_role:roleState }),
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body),
         });
         const frame = await r.json();
         if (frame.error){ $('previewHash').textContent = frame.error; $('previewSteps').innerHTML = ''; return; }
@@ -1551,24 +1574,40 @@ body{
     }, 150);
   }
 
-  /* ───────── PROOF — what the run can prove afterwards ─────────
-     Only fields the agent and SDK actually produce. No proof detail is
-     invented: if the SDK does not hand us a per-step proof, the chain of
-     verdicts against one plan hash is what gets shown. */
+  /* ───────── PROOF — GN Phase 5, the settled trust chain ─────────
+     plan_hash -> step_proof -> verdict -> derivation, per call, built only
+     from fields the frame actually carries (CONTRACT.md §3/§4). No delegation
+     hash any more — struck per CONTRACT.md §5, was never real. Click a row to
+     expand its full derivation inline; that's the "traced in two clicks" gate
+     (docs/implementation-GN.md §6) — one click to PROOF, one to the row. */
   let proofRows = [];
   function renderProof(){
     if (!proofRows.length) return;
-    const rows = proofRows.map(o => `<tr>
-      <td>${esc(o.step)}</td>
-      <td>${esc(o.action)}</td>
-      <td class="h">${o.params && o.params.stage ? 'stage=' + esc(o.params.stage) : ''}</td>
-      <td class="h">/steps/[${esc(o.step)}]/action</td>
-      <td class="v ${esc(o.verdict)}">${esc(String(o.verdict).toUpperCase())}</td>
-    </tr>`).join('');
+    const rows = proofRows.map((o, idx) => {
+      const label = o.params && o.params.stage ? `${o.action}:${o.params.stage}` : o.action;
+      const v = String(o.verdict || '').toLowerCase();
+      const hash = o.plan_hash ? esc(String(o.plan_hash).slice(0, 16)) : '—';
+      const proof = o.step_proof ? esc(String(o.step_proof).slice(0, 16)) : '—';
+      return `<tr class="proofrow" data-i="${idx}">
+        <td>${o.step === null || o.step === undefined ? '—' : esc(o.step)}</td>
+        <td>${esc(label)}</td>
+        <td class="h">${hash}</td>
+        <td class="h">${proof}</td>
+        <td class="v ${esc(v)}">${esc(String(o.verdict || '').toUpperCase())}</td>
+      </tr><tr class="proofderiv" data-i="${idx}" style="display:none"><td colspan="5">` +
+      (o.derivation && o.derivation.length ? o.derivation.map(esc).join('<br>') : '(no derivation on this frame)') +
+      `</td></tr>`;
+    }).join('');
     $('proof').innerHTML =
       `<div class="hdr">PROOF &mdash; ${proofRows.length} CALLS AGAINST PLAN ` +
-      `<b>${planHash ? esc(planHash.slice(0, 24)) : 'UNSIGNED (no enforcement)'}</b></div>` +
+      `<b>${planHash ? esc(planHash.slice(0, 24)) : 'UNSIGNED (no enforcement)'}</b> &mdash; click a row for its derivation</div>` +
       `<table>${rows}</table>`;
+    $('proof').querySelectorAll('.proofrow').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const d = $('proof').querySelector(`.proofderiv[data-i="${tr.dataset.i}"]`);
+        if (d) d.style.display = d.style.display === 'none' ? 'table-row' : 'none';
+      });
+    });
     proofReady = true;
     setTab('proof');
   }
@@ -1834,6 +1873,15 @@ body{
     policy: `<b>GENERATED POLICY</b>Walked from the signed plan, the tool manifest, and the agent's role
       at the moment of signing — not written before this run. Change the plan, not this text, and the
       policy changes with it.`,
+    goalbank: `<b>GOAL</b>Type what you want the pipeline to do and click GENERATE — the real
+      planner (temperature 0, constrained to the tool manifest) emits a plan against it, validated
+      before it can render. A non-empty goal here overrides the AUTHORIZE switches when you press
+      RUN; clear it (&times;) to go back to switches.`,
+    generate: `<b>GENERATE</b>Calls the real planner against your goal and shows the resulting plan
+      in the preview below — hash, required role per step, whether anything would hold. Not signed
+      yet; that only happens for real when you press RUN.`,
+    goalclear: `<b>CLEAR GOAL</b>Empties the goal field. RUN goes back to being driven by the
+      AUTHORIZE switches.`,
     rolebank: `<b>AGENT ROLE</b>What role the agent is granted for this run — reader, operator, or
       release_manager. A production promotion needs release_manager; anything less and it holds for a
       higher-ranked human instead of executing.`,
@@ -1844,6 +1892,9 @@ body{
       moves — <i>not</i> ArmorIQ's real signature, and never shown on the same strip a real run uses.
       Shows what the draft plan would sign as right now: its hash, every step's required role, and
       which calls would hold at the current role grant.`,
+    fallback: `<b>PLANNER FALLBACK</b>The typed goal didn't produce a usable plan (twice), so this
+      run signed the nearest cached preset instead. Honest, not a bug — a preset plan is still a
+      real signed plan.`,
     graph: `<b>PLAN GRAPH</b>Same steps as the strip above, laid out left to right with their real
       resource dependencies drawn in brass. A dashed amber ring means the step touches the evidence
       the run is graded on. The trailing dashed slot is where anything outside the plan lands.`,
@@ -2014,7 +2065,7 @@ body{
      otherwise. If evidence/unguarded_trace.jsonl doesn't exist yet (HA's
      scripts/record_unguarded.py hasn't run), this says so plainly instead
      of inventing a trace. */
-  let ghostFrames = [], ghostPtr = 0, ghostPath = null, ghostRunId = null, ghostOn = true;
+  let ghostFrames = [], ghostPtr = 0, ghostPath = null, ghostRunId = null, ghostRecordedAt = null, ghostOn = true;
 
   async function loadGhost(){
     try {
@@ -2025,6 +2076,7 @@ body{
       ghostPtr = 0;
       ghostPath = data.path || 'evidence/unguarded_trace.jsonl';
       ghostRunId = data.run_id;
+      ghostRecordedAt = data.recorded_at;
       renderGhostLabel();
     } catch (e) { ghostFrames = []; renderGhostLabel(); }
   }
@@ -2041,7 +2093,8 @@ body{
       lbl.className = 'ghostlabel';
       return;
     }
-    lbl.textContent = `RECORDED · UNGUARDED · ${ghostRunId || '?'} · ${ghostPath} (press g to hide)`;
+    // v3.md §5.4's exact required shape: RECORDED · UNGUARDED · <run id> · <timestamp>
+    lbl.textContent = `RECORDED · UNGUARDED · ${ghostRunId || '?'} · ${ghostRecordedAt || '?'} · ${ghostPath} (press g to hide)`;
     lbl.className = 'ghostlabel on' + (ghostOn ? '' : ' off');
   }
   function resetGhost(){
@@ -2057,19 +2110,31 @@ body{
       return;
     }
     if (f.type === '__verdict__' || f.type === '__step__'){
-      const action = f.action || '';
+      // a real __step__ frame carries no action field (CONTRACT.md §4) — every
+      // result_summary agent.main emits is "{action}: ...", so pull it from
+      // there rather than leaving the pulse uncoloured
+      const action = f.action || (f.result_summary || '').split(':')[0].trim();
       const hard = f.verdict === 'BLOCK_HARD';
       fire(A, hard ? 50 : 24, hard ? { decay:24 } : {});
       mark(action, hard ? '#ff2f6b' : (STEP_COLOR[action] || '#8d8271'));
     }
   }
+  /* One live resolution -> one ghost "step": consume frames up through the
+     next __step__ (or non-ALLOW __verdict__, which resolves with no __step__
+     to follow) *and* any frames trailing it — a __state__ always lands right
+     after its __step__, one line later, and without draining it too the
+     ghost's own gauge would lag its own pulses by one live event, missing
+     the beat where the two lanes are actually supposed to fork. */
   function advanceGhost(){
     if (!ghostOn || !ghostFrames.length) return;
+    let resolvedOne = false;
     while (ghostPtr < ghostFrames.length){
-      const f = ghostFrames[ghostPtr++];
+      const f = ghostFrames[ghostPtr];
+      const isBoundary = f.type === '__step__' || (f.type === '__verdict__' && f.verdict !== 'ALLOW');
+      if (isBoundary && resolvedOne) return; // the next live event's turn, not this one's
+      ghostPtr++;
       ghostApplyFrame(f);
-      if (f.type === '__step__') return;
-      if (f.type === '__verdict__' && f.verdict !== 'ALLOW') return; // out-of-plan calls resolve with no __step__ to follow
+      if (isBoundary) resolvedOne = true;
     }
   }
   document.addEventListener('keydown', e => {
@@ -2085,13 +2150,12 @@ body{
   let inFinalMessage = false; // see the "agent final message:" branch below
 
   /* ───────── v3 contract frames (type-tagged, flat) ─────────
-     Additive to the shapes above: today's real agent.main only ever emits
-     the old ones (nested __plan__, lowercase verdict), so none of this fires
-     against a real run until HA's severity engine ships. Built and gated
-     against scripts/fake_stream.py — docs/implementation-GN.md Phase 1. */
-  function stepCapV3(st){
-    return st.args && st.args.stage ? `${esc(st.action)}:${esc(st.args.stage)}` : esc(st.action);
-  }
+     Additive to the shapes above: unguarded runs keep emitting the old
+     nested __plan__ (CONTRACT.md §7.1 — nothing signed it, so it must not
+     report signed:true), so only guarded runs and scripts/fake_stream.py
+     reach this dispatch. Built and gated against fake_stream first
+     (docs/implementation-GN.md Phase 1), now verified against the real
+     backend too. */
   function buildStripV3(frame){
     buildStrip({
       steps: (frame.steps || []).map(st => ({ action: st.action, mcp: st.mcp, params: st.args || {} })),
@@ -2100,6 +2164,7 @@ body{
     });
     renderPolicy(frame);
     renderGraph(frame);
+    $('fallbackBadge').classList.toggle('on', !!frame.planner_fallback);
   }
 
   /* ───────── v3 Phase 3: the plan graph ─────────
@@ -2161,8 +2226,8 @@ body{
     const g = document.getElementById(id);
     if (!g) return;
     // V3_CLASS already carries the extra token (e.g. "bad hard") the CSS
-    // above keys the hard/scopebreach/noted look off — same taxonomy as the
-    // strip, no separate mapping to keep in sync.
+    // above keys the hard/noted look off — same taxonomy as the strip, no
+    // separate mapping to keep in sync.
     g.setAttribute('class', 'gnode ' + (keepIntruder ? 'intruder ' : '') + (V3_CLASS[o.verdict] || 'bad'));
     const label = g.querySelector('.glabel');
     if (label) label.textContent = o.args && o.args.stage ? `${o.action}:${o.args.stage}` : o.action;
@@ -2177,11 +2242,14 @@ body{
       esc(frame.generated_policy);
   }
 
-  const V3_CLASS = { ALLOW:'run', HOLD:'held', BLOCK:'bad', BLOCK_HARD:'bad hard', SCOPEBREACH:'bad scopebreach', NOTED:'done noted' };
-  const V3_CAT   = { ALLOW:'ok', HOLD:'warn', BLOCK:'err', BLOCK_HARD:'err', SCOPEBREACH:'err', NOTED:'ok' };
+  // CONTRACT.md §3's real verdict enum: ALLOW | HOLD | BLOCK | BLOCK_HARD | NOTED.
+  // SCOPEBREACH/delegation was in earlier drafts but struck per CONTRACT.md §5 —
+  // tested live against the real platform, confinement does not hold, GN does
+  // not build delegation rings. Nothing here emits it any more.
+  const V3_CLASS = { ALLOW:'run', HOLD:'held', BLOCK:'bad', BLOCK_HARD:'bad hard', NOTED:'done noted' };
+  const V3_CAT   = { ALLOW:'ok', HOLD:'warn', BLOCK:'err', BLOCK_HARD:'err', NOTED:'ok' };
   function v3HardTag(o){
     if (o.verdict === 'BLOCK_HARD') return 'NO APPROVAL PATH';
-    if (o.verdict === 'SCOPEBREACH') return (o.delegate ? o.delegate.toUpperCase() + ' ONLY' : 'OUT OF SCOPE');
     if (o.verdict === 'NOTED') return 'NOTED';
     return null;
   }
@@ -2225,10 +2293,13 @@ body{
 
     routeVerdictV3(o);
     renderVerdictCard(o);
-    proofRows.push({ step:o.step_index, action:o.action, params:o.args, verdict:o.verdict });
+    proofRows.push({
+      step:o.step_index, action:o.action, params:o.args, verdict:o.verdict,
+      plan_hash:o.plan_hash, step_proof:o.step_proof, derivation:o.derivation || [],
+    });
 
     setLamp(el.hardBlock, hard);
-    if (o.verdict === 'BLOCK' || o.verdict === 'SCOPEBREACH'){
+    if (o.verdict === 'BLOCK'){
       setLamp(el.block, true);
       L.ceiling = 34; fire(L, 60, { decay:26 }); el.ceilTag.classList.add('hot');
       say(`${o.verdict} · ${o.action}`);
@@ -2246,9 +2317,9 @@ body{
     } else {
       say(`${o.action} ${o.verdict.toLowerCase()}`);
     }
-    // ALLOW resolves later via its own __step__ frame; anything else (a hold,
-    // a block, a scopebreach) is already resolved right here — advance the
-    // ghost in lockstep, one live resolution at a time, never on a timer
+    // ALLOW resolves later via its own __step__ frame; anything else (a hold
+    // or a block) is already resolved right here — advance the ghost in
+    // lockstep, one live resolution at a time, never on a timer
     if (o.verdict !== 'ALLOW' && laneKey === 'B') advanceGhost();
   }
 
@@ -2267,7 +2338,13 @@ body{
         stepEls[obj.step_index].className = 'pstep done';
         advanceP(obj.step_index);
         const g = document.getElementById(`gnode-${obj.step_index}`);
-        if (g) g.setAttribute('class', 'gnode done');
+        if (g){
+          g.setAttribute('class', 'gnode done');
+          // an escalation resolves HOLD -> (resume) -> this __step__ — the
+          // sub-label was left on "hold" from the verdict frame otherwise
+          const sub = g.querySelector('.gsub');
+          if (sub) sub.textContent = 'executed';
+        }
       }
       log(obj.result_summary || `step ${obj.status}`, 'ok');
       if (laneKey === 'B') advanceGhost();
@@ -2292,9 +2369,15 @@ body{
       return;
     }
     if (obj && obj.type === '__END__'){
-      const bad = String(obj.outcome || '').startsWith('block') || obj.outcome === 'scopebreach';
-      log(`run complete — outcome ${obj.outcome}`, bad ? 'err' : obj.outcome === 'held_then_approved' ? 'warn' : 'ok');
-      say('COMPLETE — ' + String(obj.outcome || '').toUpperCase());
+      // CONTRACT.md §7.4 — the real enum: unguarded | clean | held_then_approved
+      // | blocked | not_approved. "unguarded" is a plain fact, not a verdict —
+      // nothing enforced, so it's neither good nor bad.
+      const outcome = String(obj.outcome || '');
+      const cls = outcome === 'blocked' || outcome === 'not_approved' ? 'err'
+        : outcome === 'held_then_approved' ? 'warn'
+        : outcome === 'unguarded' ? '' : 'ok';
+      log(`run complete — outcome ${outcome}`, cls || undefined);
+      say('COMPLETE — ' + outcome.toUpperCase());
       return;
     }
 
@@ -2316,41 +2399,16 @@ body{
       return;
     }
 
-    if (obj && obj.verdict){
-      const color = STEP_COLOR[obj.action] || '#8d8271';
-      fire(L, obj.verdict === 'blocked' ? 44 : 24, obj.verdict === 'blocked' ? { decay:22 } : {});
-      mark(obj.action, color);
-      log(`${obj.action.padEnd(18)} ${obj.verdict}${obj.reason ? ' — ' + obj.reason : ''}`,
-          obj.verdict === 'blocked' ? 'err' : obj.verdict === 'held' ? 'warn' : 'ok');
-      updatePlan(obj);
-      proofRows.push(obj);
-
-      if (obj.verdict === 'blocked' && obj.action === 'delete_rows'){
-        L.ceiling = 34; fire(L, 60, { decay:26 });
-        setLamp(el.block, true); el.ceilTag.classList.add('hot');
-        say('BLOCKED · delete_rows ABSENT FROM SIGNED PLAN');
-      }
-      if (obj.verdict === 'executed' && obj.action === 'delete_rows'){
-        L.base = -20; say('UNGUARDED · ROWS DELETED FROM THE EVAL SET');
-      }
-      if (obj.verdict === 'held'){
-        startHoldTimer();
-        L.frozen = true; fire(L, 30, { hold:true, decay:900, peak:8 });
-        setLamp(el.hold, true, true);
-        el.keyhole.classList.add('armed'); el.keycell.classList.add('armed');
-        el.keyLabel.textContent = 'WAITING ON A HUMAN';
-        el.keySub.textContent = obj.reason || 'promote_model · stage=production';
-        say('HELD · APPROVE AT platform.armoriq.ai');
-      }
-      if (obj.verdict === 'approved'){
-        stopHoldTimer();
-        L.frozen = false;
-        setLamp(el.hold, false);
-        el.keyhole.classList.add('turned');
-        el.keyLabel.textContent = 'APPROVED';
-        el.keySub.textContent = obj.reason || 'agent resumed';
-        say('APPROVED — AGENT RESUMING');
-      }
+    if (obj && obj.verdict && !obj.type){
+      // the raw audit-log line (agent/logging.py's log_event, lowercase
+      // verdict: executed/blocked/held/approved) — CONTRACT.md's additive
+      // rule keeps it flowing on stdout alongside the v3 frames, deliberately,
+      // for the on-disk logs/<run_id>.jsonl trail. But every real run now ALSO
+      // emits __verdict__/__step__/__state__ for the exact same call, richer
+      // and already driving the pulse, the strip, the graph, PROOF and the
+      // gauges — rendering this line too would double-paint every single one
+      // of them. Quiet reference line in the console only, no side effects.
+      log(`${obj.action} ${obj.verdict}${obj.reason ? ' — ' + obj.reason : ''}`);
       return;
     }
 
@@ -2388,7 +2446,7 @@ body{
   function startRun(){
     if (running) return;
     const cfg = currentCfg();
-    if (!cfg.authorized.length && !cfg.promote_production) return;
+    if (!cfg.authorized.length && !cfg.promote_production && !goalState.trim()) return;
     running = true; setControlsEnabled(false);
 
     const laneKey = guardedMode ? 'B' : 'A';
@@ -2407,10 +2465,13 @@ body{
 
     const mode = guardedMode ? 'guarded' : 'unguarded';
     const violation = dialState.__replay__ || 0;
+    const goal = goalState.trim();
     say(`RUNNING · ${mode.toUpperCase()}${violation ? ' · REPLAY' : ''}`);
-    log(`> agent.main --${mode} --config '${JSON.stringify(cfg)}'${violation ? ' --force-violation ' + violation : ''}`);
+    log(`> agent.main --${mode} --config '${JSON.stringify(cfg)}'${violation ? ' --force-violation ' + violation : ''}` +
+        (goal ? ` --goal '${goal}'` : ''));
 
-    const q = `mode=${mode}&violation=${violation}&cfg=${encodeURIComponent(JSON.stringify(cfg))}`;
+    let q = `mode=${mode}&violation=${violation}&cfg=${encodeURIComponent(JSON.stringify(cfg))}`;
+    if (goal) q += `&goal=${encodeURIComponent(goal)}`;
     const src = new EventSource(`/api/run?${q}`);
     src.onmessage = (e) => {
       if (e.data === '__END__'){
@@ -2434,7 +2495,7 @@ body{
   }
 
   /* ───────── v3 dev/screenshot path — scripts/fake_stream.py ─────────
-     `?fake=blocked|held|approved|scopebreach|clean` on the page URL drives
+     `?fake=blocked|held|approved|clean` on the page URL drives
      the exact same SSE endpoint and the exact same handleEvent() code path
      as a real run, just against replayed contract frames. Not wired to any
      panel control on purpose — this is a testing tool, not a demo feature. */
