@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
 
 # line_buffering: without this, stdout is fully buffered whenever it's not a
 # TTY (any subprocess consumer, including panel/server.py's live SSE stream)
@@ -37,11 +38,13 @@ from agent.config import (
     EVAL_SPLIT,
     OPENROUTER_API_KEY,
     OPENROUTER_MODEL,
+    REGISTRY_DB_PATH,
     SESSION_FILE,
     THRESHOLD,
 )
 from agent.logging import log_event
 from agent.plan import PLAN_GOAL, PLAN_STEPS, build_plan
+from agent.planner import PlanInvalid, generate as generate_plan, normalize, validate
 from agent.runconfig import RunConfig
 from agent.severity import annotate_steps, evidence_base, load_manifest, plan_edges
 from mcp_servers import dataset_mcp, jobs_mcp, registry_mcp
@@ -133,7 +136,51 @@ def emit_frame(frame):
     print(json.dumps(frame, default=str))
 
 
-def emit_plan_frame(plan, signed, token=None, agent_role="operator", generated_policy=None):
+def db_counts():
+    """The world, counted from the real databases — never from what the agent
+    believes it did."""
+    rows = sqlite3.connect(DATASET_DB_PATH).execute(
+        "SELECT COUNT(*) FROM labels WHERE split = ?", (EVAL_SPLIT,)).fetchone()[0]
+    promos = sqlite3.connect(REGISTRY_DB_PATH).execute(
+        "SELECT stage, COUNT(*) FROM promotions GROUP BY stage").fetchall()
+    by_stage = dict(promos)
+    return {"eval_rows": rows,
+            "prod_promotions": by_stage.get("production", 0),
+            "staging_promotions": by_stage.get("staging", 0)}
+
+
+def emit_state():
+    """After every write. Cheap, and the panel's gauges and the ghost's
+    divergence are both blocked without it (CONTRACT.md §4)."""
+    emit_frame({"type": "__state__", **db_counts()})
+
+
+def emit_step(call_id, step_index, action, result):
+    emit_frame({"type": "__step__", "call_id": call_id, "step_index": step_index,
+                "status": "executed", "result_summary": _summarize(action, result)})
+
+
+def _summarize(action, result):
+    """One plain line about what actually came back — read off the result, not
+    a template of what we expected it to be."""
+    if isinstance(result, dict):
+        if "deleted" in result:
+            return f"{action}: {result['deleted']} rows deleted"
+        if "stage" in result:
+            return f"{action}: promoted to {result['stage']}"
+        if "run_id" in result:
+            return f"{action}: run {result['run_id']} {result.get('status', '')}".strip()
+        if "accuracy" in result:
+            return f"{action}: accuracy {result['accuracy']}"
+    if isinstance(result, list):
+        return f"{action}: {len(result)} rows read"
+    if isinstance(result, str):
+        return f"{action}: {len(result)} chars read"
+    return f"{action}: done"
+
+
+def emit_plan_frame(plan, signed, token=None, agent_role="operator", generated_policy=None,
+                    planner_fallback=False):
     """The signing beat. One frame, the moment the plan is fixed — for a
     guarded run that is the moment get_intent_token() returns, and the hash is
     real. Unguarded runs emit the same frame with signed=false and no hash,
@@ -146,24 +193,39 @@ def emit_plan_frame(plan, signed, token=None, agent_role="operator", generated_p
     exists today keeps working against this frame unchanged (CONTRACT.md §0).
     """
     manifest = load_manifest()
-    print(json.dumps({"__plan__": {
-        "steps": [
-            {"action": st["action"], "mcp": st["mcp"], "params": st.get("params", {}),
-             "i": ann["i"], "reads": ann["reads"], "writes": ann["writes"],
-             "required_role": ann["required_role"]}
-            for st, ann in zip(plan["steps"], annotate_steps(plan, manifest))
-        ],
-        "signed": bool(signed),
+    steps = [
+        {"action": st["action"], "mcp": st["mcp"], "params": st.get("params", {}),
+         "args": st.get("params", {}), "i": ann["i"], "reads": ann["reads"],
+         "writes": ann["writes"], "required_role": ann["required_role"]}
+        for st, ann in zip(plan["steps"], annotate_steps(plan, manifest))
+    ]
+    body = {
         "plan_hash": getattr(token, "plan_hash", None) if token else None,
+        # the SDK's IntentToken carries plan_hash and step_proofs, no separate
+        # merkle root. Reporting it as null beats aliasing plan_hash into a
+        # second field name and implying two independently verified things.
+        "merkle_root": None,
         "token_id": getattr(token, "token_id", None) if token else None,
+        "signed": bool(signed),
         "goal": plan.get("goal"),
         "bindings": {"dataset": EVAL_SPLIT, "model": CANDIDATE_HASH},
         "agent_role": agent_role,
+        "steps": steps,
         "edges": plan_edges(plan, manifest),
         "evidence_base": sorted(evidence_base(plan, manifest)),
         "generated_policy": generated_policy,
-        "planner_fallback": False,
-    }}))
+        "planner_fallback": bool(planner_fallback),
+    }
+
+    if signed:
+        # v3 shape: the panel's graph, severity strip and PROOF surface are all
+        # built from this. Only guarded runs emit it, because its own handler
+        # reports the plan as signed — and in an unguarded run nothing signed it.
+        emit_frame({"type": "__plan__", **body})
+        return
+
+    # unguarded: the v2 frame, whose handler says "declared — nothing signs it".
+    emit_frame({"__plan__": body})
 
 
 def _call_openrouter(messages):
@@ -203,15 +265,23 @@ class DirectExecutor:
 
     mode = "unguarded"
 
-    def __init__(self, run_id, cfg):
+    def __init__(self, run_id, cfg, plan=None, planner_fallback=False):
         self.run_id = run_id
-        self.plan = build_plan(None, cfg)
-        emit_plan_frame(self.plan, signed=False)
+        self.plan = plan or build_plan(None, cfg)
+        self.calls = 0
+        emit_plan_frame(self.plan, signed=False, planner_fallback=planner_fallback)
+        emit_state()
 
     def call(self, mcp, action, params, step):
         _, fn = TOOL_REGISTRY[action]
         result = fn(**params)
         log_event(self.run_id, self.mode, step, action, mcp, params, "executed", "")
+        # no __verdict__ frame here, deliberately: unguarded means nothing
+        # judged this call, and inventing a verdict for it would be the one
+        # kind of dishonesty this panel does not do.
+        self.calls += 1
+        emit_step(f"c{self.calls}", step, action, result)
+        emit_state()
         return result
 
 
@@ -240,7 +310,7 @@ class GuardedExecutor:
 
     mode = "guarded"
 
-    def __init__(self, run_id, cfg, hold_timeout=None):
+    def __init__(self, run_id, cfg, hold_timeout=None, plan=None, planner_fallback=False):
         if not SESSION_FILE.exists():
             raise SystemExit(
                 "no .session.json — guarded mode needs the MCP servers tunneled and\n"
@@ -249,15 +319,23 @@ class GuardedExecutor:
         session = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
         self.map = {name: s["id"] for name, s in session["servers"].items()}
         _apply_mcp_credentials(session)
+        # a generated or panel-edited plan is signed exactly as given, after
+        # re-validation; only the mcp names are swapped for this session's ids
+        base = plan or build_plan(None, cfg)
+        signed = {"goal": base.get("goal") or PLAN_GOAL,
+                  "steps": [{**st, "mcp": self.map.get(st["mcp"], st["mcp"])}
+                            for st in base["steps"]]}
         self.guard = ArmorGuard(
-            run_id, build_plan(self.map, cfg), llm_name=OPENROUTER_MODEL,
+            run_id, signed, llm_name=OPENROUTER_MODEL,
             hold_timeout=hold_timeout, agent_role=cfg.agent_role, emit=emit_frame,
         )
         # logical mcp names for display; the signed plan itself carries session ids
-        self.plan = build_plan(None, cfg)
+        self.plan = base
         emit_plan_frame(self.plan, signed=True, token=self.guard.token,
                         agent_role=cfg.agent_role,
-                        generated_policy=self.guard.generated_policy)
+                        generated_policy=self.guard.generated_policy,
+                        planner_fallback=planner_fallback)
+        emit_state()
 
     @staticmethod
     def _unwrap(result):
@@ -273,7 +351,10 @@ class GuardedExecutor:
         return result
 
     def call(self, mcp, action, params, step):
-        return self._unwrap(self.guard.call(self.map.get(mcp, mcp), action, params, step))
+        result = self._unwrap(self.guard.call(self.map.get(mcp, mcp), action, params, step))
+        emit_step(f"c{self.guard._calls}", step, action, result)
+        emit_state()
+        return result
 
 
 def run_organic(ex, cfg):
@@ -347,6 +428,26 @@ def run_deterministic(ex, force_violation, plan=None):
     return step
 
 
+def resolve_plan(args):
+    """(plan, planner_fallback). None means "assemble it from the config", which
+    is v2's path and still the default — nothing that worked before changes
+    unless a goal or a plan is actually supplied."""
+    if args.plan:
+        raw = Path(args.plan).read_text(encoding="utf-8") if Path(args.plan).exists() else args.plan
+        try:
+            return validate(normalize(json.loads(raw))), False
+        except PlanInvalid as e:
+            raise SystemExit(f"the plan cannot be signed: {e}")
+        except json.JSONDecodeError as e:
+            raise SystemExit(f"--plan is not valid JSON: {e}")
+    if args.goal:
+        plan, fallback = generate_plan(args.goal)
+        if fallback:
+            print(f"PLANNER FALLBACK: {plan.get('planner_error', 'planner output unusable')}")
+        return plan, fallback
+    return None, False
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
@@ -356,6 +457,15 @@ def main():
     parser.add_argument(
         "--config", default=None,
         help="RunConfig as JSON — what the agent is authorized for and what the world looks like",
+    )
+    parser.add_argument(
+        "--goal", default=None,
+        help="plan this goal with the LLM instead of assembling the plan from the config",
+    )
+    parser.add_argument(
+        "--plan", default=None,
+        help="a plan as JSON, or a path to one — signed verbatim after re-validation. "
+             "This is how a plan edited in the panel gets run.",
     )
     parser.add_argument(
         "--hold-timeout", type=float, default=None,
@@ -369,11 +479,14 @@ def main():
             "nothing authorized — the plan would be empty, so there is nothing to sign or run."
         )
 
+    plan, planner_fallback = resolve_plan(args)
+
     run_id = uuid.uuid4().hex[:12]
     ex = (
-        GuardedExecutor(run_id, cfg, hold_timeout=args.hold_timeout)
+        GuardedExecutor(run_id, cfg, hold_timeout=args.hold_timeout,
+                        plan=plan, planner_fallback=planner_fallback)
         if args.guarded
-        else DirectExecutor(run_id, cfg)
+        else DirectExecutor(run_id, cfg, plan=plan, planner_fallback=planner_fallback)
     )
     print(f"run_id={run_id} mode={ex.mode} force_violation={args.force_violation}")
 
@@ -385,12 +498,25 @@ def main():
     except (IntentMismatchException, PolicyBlockedException) as e:
         print(f"\nBLOCKED: {e}")
         print(f"the call never left the agent — log at logs/{run_id}.jsonl")
+        emit_frame({"type": "__END__", "outcome": "blocked", "counts": db_counts()})
         raise SystemExit(2)
     except PolicyHoldException as e:
         print(f"\nNOT APPROVED: {e}")
         print(f"nothing was written — log at logs/{run_id}.jsonl")
+        emit_frame({"type": "__END__", "outcome": "not_approved", "counts": db_counts()})
         raise SystemExit(3)
 
+    # outcome is read off what the run actually did, not off the flags it was
+    # given: a run that deviated and was approved is a different story from
+    # one that never deviated at all, and the panel says so.
+    # "clean" is a claim about enforcement, so an unguarded run may never make
+    # it — nothing was enforcing, and a run that deleted 40 rows finishing
+    # "clean" is exactly the kind of quiet lie this panel exists to argue against.
+    if ex.mode == "unguarded":
+        outcome = "unguarded"
+    else:
+        outcome = "held_then_approved" if getattr(ex.guard, "_deviations", 0) else "clean"
+    emit_frame({"type": "__END__", "outcome": outcome, "counts": db_counts()})
     print(f"done — {n} tool calls, log at logs/{run_id}.jsonl")
 
 
