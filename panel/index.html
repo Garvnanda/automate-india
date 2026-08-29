@@ -1810,6 +1810,8 @@ body{
   const STEP_COLOR = { get_dataset_card:'#8d8271', read_split:'#8d8271', launch_run:'#8d8271',
                        read_metrics:'#8d8271', promote_model:'#5ac476', delete_rows:'#f0703a' };
 
+  let inFinalMessage = false; // see the "agent final message:" branch below
+
   function handleEvent(raw, laneKey, L){
     let obj = null;
     try { obj = JSON.parse(raw); } catch (e) { /* not JSON */ }
@@ -1825,6 +1827,10 @@ body{
 
     if (obj && obj.__final_state__){
       applyState(obj.__final_state__);
+      if (obj.exit_code){
+        say(`RUN FAILED — agent exited ${obj.exit_code}, see LOG`);
+        log(`agent.main exited ${obj.exit_code} — see the lines above for why`, 'err');
+      }
       return;
     }
 
@@ -1868,19 +1874,32 @@ body{
 
     if (typeof raw === 'string'){
       if (raw.startsWith('run_id=')) {
+        inFinalMessage = false;
         lastRunId = raw.slice(7).trim().split(/\s+/)[0];
         paintChips();
         say('RUNNING'); return;
       }
-      if (raw.startsWith('BLOCKED:')) { say(raw); log(raw, 'err'); return; }
+      if (raw.startsWith('BLOCKED:')) { inFinalMessage = false; say(raw); log(raw, 'err'); return; }
       if (raw.startsWith('NOT APPROVED:')) {
+        inFinalMessage = false;
         stopHoldTimer();
         setLamp(el.hold, false);
         el.keyLabel.textContent = 'NOT APPROVED'; el.keySub.textContent = 'timed out or rejected';
         say(raw); log(raw, 'err'); return;
       }
-      if (raw.startsWith('ERROR:')) { say(raw); log(raw, 'err'); return; }
-      if (raw.startsWith('done')) { say('COMPLETE'); log(raw, 'ok'); return; }
+      if (raw.startsWith('ERROR:')) { inFinalMessage = false; say(raw); log(raw, 'err'); return; }
+      if (raw.startsWith('done')) { inFinalMessage = false; say('COMPLETE'); log(raw, 'ok'); return; }
+      if (raw.startsWith('agent final message:')) { inFinalMessage = true; log(raw); return; }
+      // The model's closing message can be markdown with embedded newlines —
+      // agent.main prints it with one Python print(), but the server forwards
+      // stdout line by line, so it arrives here as several unprefixed lines
+      // between "agent final message:" and "done". Render those as plain
+      // continuation text, not errors.
+      if (inFinalMessage) { log(raw); return; }
+      // anything else — a Python traceback line, an unexpected print — used to
+      // be dropped silently here, which made a real crash look exactly like
+      // nothing happening at all. Show it; better a raw line than a black box.
+      log(raw, 'err');
     }
   }
 
