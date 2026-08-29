@@ -46,6 +46,7 @@ from armoriq_sdk.exceptions import (
 )
 from armoriq_sdk.models import DelegationRequestParams
 
+from agent.crew import delegation_hash, scope_breach, split_plan
 from agent.config import (
     AGENT_EMAIL,
     AGENT_ID,
@@ -66,7 +67,7 @@ class ArmorGuard:
     MCP server."""
 
     def __init__(self, run_id, plan, llm_name="agent", hold_timeout=None,
-                 agent_role="operator", emit=None):
+                 agent_role="operator", emit=None, crew=False):
         self.run_id = run_id
         self.plan = plan
         self.agent_role = agent_role
@@ -90,6 +91,25 @@ class ArmorGuard:
         )
         self.planned_actions = {s["action"] for s in plan.get("steps", [])}
 
+        # delegation: sub-plans carved from the plan that was just signed, so a
+        # delegate's scope is derived from the parent's own steps rather than
+        # granted separately. None = single agent, exactly as before.
+        self.crew = split_plan(plan) if crew else None
+        self.delegate = None
+
+    def enter_delegate(self, name):
+        """Hand control to one delegate. Sequential only — there is never more
+        than one delegate acting, which is what keeps the demo legible and the
+        implementation honest about what it does not do."""
+        if not self.crew:
+            raise RuntimeError("this run has no crew")
+        self.delegate = next(m for m in self.crew if m["name"] == name)
+        self.emit({"type": "__delegate__", "delegate": name,
+                   "steps": [s["action"] for s in self.delegate["steps"]],
+                   "plan_hash": self.token.plan_hash,
+                   "delegation_hash": delegation_hash(self.token.plan_hash, self.delegate)})
+        return self.delegate
+
     def call(self, mcp, action, params, step_index):
         """Execute one call through ArmorIQ. Returns the tool's result on
         success; raises on block/reject/timeout — callers catch and stop the
@@ -102,6 +122,25 @@ class ArmorGuard:
         """
         self._calls += 1
         call_id = f"c{self._calls}"
+
+        # the delegation boundary, checked first because nothing downstream can
+        # see it: the parent plan contains this action, so ArmorIQ would allow
+        # it and every role check passes — the crew genuinely holds the
+        # authority. Only this delegate does not.
+        if self.delegate is not None and action not in self.delegate["actions"]:
+            verdict = scope_breach(self.delegate, action, step_index,
+                                   self.plan.get("steps", []), self.token.plan_hash)
+            verdict["call_id"] = call_id
+            verdict["mcp"] = mcp
+            verdict["args"] = params
+            verdict["plan_hash"] = self.token.plan_hash
+            verdict["step_proof"] = self._step_proof(action)
+            self.emit({"type": "__verdict__", **verdict})
+            self._deviations += 1
+            log_event(self.run_id, "guarded", step_index, action, mcp, params, "blocked",
+                      verdict["derivation"][-1].removeprefix("-> "))
+            raise PolicyBlockedException(
+                f"{action} is authorized for the crew, not for the {self.delegate['name']}")
 
         if action not in self.planned_actions:
             verdict = self._judge(call_id, mcp, action, params, step_index)
@@ -125,8 +164,11 @@ class ArmorGuard:
                 "verdict": "ALLOW", "approvable": True,
                 "axes": {"reversibility": None, "blast_radius": "in-scope", "authority_delta": 0},
                 "derivation": [f"in signed plan (step {step_index}: {action})"],
-                "touches_evidence": [], "delegate": None,
-                "plan_hash": self.token.plan_hash, "delegation_hash": None,
+                "touches_evidence": [],
+                "delegate": self.delegate["name"] if self.delegate else None,
+                "plan_hash": self.token.plan_hash,
+                "delegation_hash": (delegation_hash(self.token.plan_hash, self.delegate)
+                                    if self.delegate else None),
                 "step_proof": self._step_proof(action),
             })
             return self._call_direct(mcp, action, params, step_index, call_id)
@@ -148,8 +190,9 @@ class ArmorGuard:
                            plan_hash=self.token.plan_hash, reason=reason,
                            step_index=step_index)
         verdict["call_id"] = call_id
-        verdict["delegate"] = None
-        verdict["delegation_hash"] = None
+        verdict["delegate"] = self.delegate["name"] if self.delegate else None
+        verdict["delegation_hash"] = (
+            delegation_hash(self.token.plan_hash, self.delegate) if self.delegate else None)
         verdict["step_proof"] = self._step_proof(action)
         self.emit({"type": "__verdict__", **verdict})
         return verdict

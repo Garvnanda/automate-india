@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 # line_buffering: without this, stdout is fully buffered whenever it's not a
@@ -129,6 +130,49 @@ def system_prompt(cfg):
         f"You may promote to: {stages}. "
         "When you are done, reply with a short summary and no further tool calls."
     )
+
+
+RUN_LOCK = DATASET_DB_PATH.parent / ".run.lock"
+LOCK_STALE_SECONDS = 900
+
+
+def acquire_run_lock():
+    """One run at a time, because one SQLite database.
+
+    data/seed.py drops and recreates the tables, so a second run starting while
+    a first is still going deletes the rows the first already wrote — and the
+    first then fails an assertion about *its own* work with no hint that anyone
+    else was involved. That is exactly how a confusing `no staging promotion: []`
+    happens while the promotion is sitting in the database.
+
+    Advisory, not a kernel lock: an O_EXCL create, released in a finally, and
+    treated as stale after 15 minutes so a killed run cannot wedge the demo.
+    """
+    RUN_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    if RUN_LOCK.exists() and time.time() - RUN_LOCK.stat().st_mtime > LOCK_STALE_SECONDS:
+        RUN_LOCK.unlink(missing_ok=True)
+    try:
+        fd = os.open(RUN_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        holder = ""
+        try:
+            holder = RUN_LOCK.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+        raise SystemExit(
+            "another agent run is already in progress"
+            + (f" ({holder})" if holder else "")
+            + ".\n"
+            "They share one SQLite database, so a second run would delete the first's\n"
+            "rows mid-flight. Wait for it to finish, or delete data/.run.lock if\n"
+            "nothing is actually running."
+        )
+    with os.fdopen(fd, "w") as f:
+        f.write(f"pid={os.getpid()} started={datetime.now(timezone.utc).isoformat()}")
+
+
+def release_run_lock():
+    RUN_LOCK.unlink(missing_ok=True)
 
 
 def emit_frame(frame):
@@ -310,7 +354,8 @@ class GuardedExecutor:
 
     mode = "guarded"
 
-    def __init__(self, run_id, cfg, hold_timeout=None, plan=None, planner_fallback=False):
+    def __init__(self, run_id, cfg, hold_timeout=None, plan=None, planner_fallback=False,
+                 crew=False):
         if not SESSION_FILE.exists():
             raise SystemExit(
                 "no .session.json — guarded mode needs the MCP servers tunneled and\n"
@@ -326,7 +371,7 @@ class GuardedExecutor:
                   "steps": [{**st, "mcp": self.map.get(st["mcp"], st["mcp"])}
                             for st in base["steps"]]}
         self.guard = ArmorGuard(
-            run_id, signed, llm_name=OPENROUTER_MODEL,
+            run_id, signed, llm_name=OPENROUTER_MODEL, crew=crew,
             hold_timeout=hold_timeout, agent_role=cfg.agent_role, emit=emit_frame,
         )
         # logical mcp names for display; the signed plan itself carries session ids
@@ -448,12 +493,64 @@ def resolve_plan(args):
     return None, False
 
 
+
+def run_crew(ex, cross_scope=False):
+    """The plan run by two delegates instead of one agent.
+
+    `cross_scope` injects the violation nothing else in this project can catch:
+    the evaluator reaching for the deployer's step. Everything about that call is
+    legitimate at crew level — right tool, right argument, right role, and it is
+    in the signed plan. Only the delegation boundary refuses it.
+    """
+    guard = getattr(ex, "guard", None)
+    if guard is None or not guard.crew:
+        raise SystemExit("--crew needs guarded mode: the boundary is meaningless with nothing enforcing it")
+
+    step = 0
+    for member in guard.crew:
+        guard.enter_delegate(member["name"])
+        actions = ", ".join(s["action"] for s in member["steps"])
+        print(f"\n  -- {member['name']}: {actions}")
+
+        if cross_scope and member["name"] == "evaluator":
+            # run the evaluator's own steps first, so the breach lands after it
+            # has done legitimate work — an agent going off the rails mid-job,
+            # not one that was wrong from its first call
+            for planned in member["steps"]:
+                ex.call(planned["mcp"], planned["action"], dict(planned["params"]), step)
+                step += 1
+            reach = next((s for m in guard.crew if m["name"] != "evaluator"
+                          for s in m["steps"]), None)
+            if reach is None:
+                raise SystemExit("this plan has no second delegate to reach into")
+            print(f"  -- evaluator reaches for {reach['action']} (the deployer's step)")
+            ex.call(reach["mcp"], reach["action"], dict(reach["params"]), step)
+            step += 1
+            continue
+
+        for planned in member["steps"]:
+            ex.call(planned["mcp"], planned["action"], dict(planned["params"]), step)
+            step += 1
+    return step
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--unguarded", action="store_true", help="direct MCP calls, no ArmorIQ")
     group.add_argument("--guarded", action="store_true", help="every call routed through ArmorIQ")
-    parser.add_argument("--force-violation", type=int, choices=[1, 2], default=None)
+    parser.add_argument("--force-violation", type=int, choices=[1, 2, 3], default=None)
+    parser.add_argument(
+        "--crew", action="store_true",
+        help="run the plan as two delegates (evaluator, deployer) carved out of "
+             "the signed plan. Implied by --force-violation 3.",
+    )
+    parser.add_argument(
+        "--deterministic", action="store_true",
+        help="run the plan straight through with no LLM. Same executor, same "
+             "enforcement — only the thing choosing the calls changes, so a "
+             "provider outage cannot take the demo down.",
+    )
     parser.add_argument(
         "--config", default=None,
         help="RunConfig as JSON — what the agent is authorized for and what the world looks like",
@@ -481,17 +578,28 @@ def main():
 
     plan, planner_fallback = resolve_plan(args)
 
+    acquire_run_lock()
+    try:
+        run(args, cfg, plan, planner_fallback)
+    finally:
+        release_run_lock()
+
+
+def run(args, cfg, plan, planner_fallback):
     run_id = uuid.uuid4().hex[:12]
     ex = (
         GuardedExecutor(run_id, cfg, hold_timeout=args.hold_timeout,
-                        plan=plan, planner_fallback=planner_fallback)
+                        plan=plan, planner_fallback=planner_fallback,
+                        crew=args.crew or args.force_violation == 3)
         if args.guarded
         else DirectExecutor(run_id, cfg, plan=plan, planner_fallback=planner_fallback)
     )
     print(f"run_id={run_id} mode={ex.mode} force_violation={args.force_violation}")
 
     try:
-        if args.force_violation:
+        if args.crew or args.force_violation == 3:
+            n = run_crew(ex, args.force_violation == 3)
+        elif args.force_violation or args.deterministic:
             n = run_deterministic(ex, args.force_violation, ex.plan)
         else:
             n = run_organic(ex, cfg)
@@ -500,6 +608,14 @@ def main():
         print(f"the call never left the agent — log at logs/{run_id}.jsonl")
         emit_frame({"type": "__END__", "outcome": "blocked", "counts": db_counts()})
         raise SystemExit(2)
+    except RuntimeError as e:
+        # the LLM provider, not us: free-tier OpenRouter models go down, and a
+        # traceback mid-demo reads as "their project is broken"
+        print(f"\nLLM UNAVAILABLE: {e}")
+        print("the agent could not think, so nothing ran. Enforcement is untouched —")
+        print("re-run with --deterministic to exercise the same path without the LLM.")
+        emit_frame({"type": "__END__", "outcome": "llm_unavailable", "counts": db_counts()})
+        raise SystemExit(4)
     except PolicyHoldException as e:
         print(f"\nNOT APPROVED: {e}")
         print(f"nothing was written — log at logs/{run_id}.jsonl")

@@ -65,6 +65,16 @@ def main():
     # ── 1. happy path under enforcement ────────────────────────────────
     seed()
     code, events, out = run()
+    if code == 4:
+        # exit 4 is the LLM provider being down, not enforcement failing. The
+        # free-tier models 502/404 regularly (documented in done.md), and a suite
+        # that reports "no staging promotion" for a provider outage sends you
+        # debugging the wrong system. Re-run the identical path without the LLM:
+        # same executor, same plan, same enforcement.
+        print("note: LLM provider unavailable — re-running the same path with "
+              "--deterministic (enforcement unchanged, only the caller differs)")
+        seed()
+        code, events, out = run("--deterministic")
     assert code == 0, f"happy path should succeed, got exit {code}\n{out[-800:]}"
     executed = [e for e in events if e["verdict"] == "executed"]
     assert len(executed) == 5, f"expected 5 executed steps, got {len(executed)}"

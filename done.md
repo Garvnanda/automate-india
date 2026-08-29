@@ -1191,6 +1191,38 @@ committed, so the real path stays honestly empty for HA to fill):
 - [ ] Kill switch's live keypress path not independently confirmed (see above) — logic verified,
       real-key path worth a manual check once a person is at the keyboard rather than automation.
 
+## v3 Batch — two real failures found by running the suite, both fixed at the root
+Triggered by `tests/verify_guarded.py` failing on the user's machine with
+`AssertionError: no staging promotion: []`.
+
+- [x] **The assertion was true and the diagnosis it implied was false.** The guarded run *had*
+      promoted — its log showed `executed promote_model stage=staging` — and the promotion row was
+      sitting in the database when checked. Root cause found by correlating log timestamps rather
+      than by reading the test: **two guarded runs overlapped in time** (`9c9183d99ea3` 08:02:15 ->
+      08:06:07, with `9669ae3f4a9c` 08:02:45 -> 08:02:50 running entirely inside its window).
+      `data/seed.py` does `DROP TABLE IF EXISTS promotions`, so whichever run reseeded next deleted
+      the other's row mid-flight, and the first then failed an assertion about its own work with no
+      hint anyone else was involved.
+      **`done.md` Batch 4 had already recorded this constraint** — "unguarded and guarded share one
+      SQLite database, so they genuinely cannot run simultaneously" — but nothing enforced it.
+      **Fixed where every caller routes through** (`agent/main.py`, not in the test): an advisory
+      `data/.run.lock`, O_EXCL create, released in a `finally`, treated as stale after 15 minutes so
+      a killed run cannot wedge the demo. A second run now exits with a plain sentence naming the
+      holder instead of corrupting the first one's results. Verified both directions: a planted lock
+      refuses a run, and a normal run leaves no lock behind. Added to `.gitignore`.
+- [x] **The free-tier LLM provider went down mid-verification**, first `502` then `404` from
+      OpenRouter's Nvidia provider. This surfaced as a raw `RuntimeError` traceback — which mid-demo
+      reads as "their project is broken" when nothing of ours is.
+      **Two fixes.** `agent/main.py` now catches it, prints `LLM UNAVAILABLE` with what it means, and
+      exits **4** with an `__END__ outcome: llm_unavailable` frame. And a new `--deterministic` flag
+      runs the plan straight through with **no LLM at all** — same executor, same plan, same
+      enforcement, only the thing choosing the calls changes. Verified in both modes (unguarded: 5
+      steps, staging landed; guarded: 5 `ALLOW` verdicts through the real proxy).
+- [x] `tests/verify_guarded.py` treats exit 4 as a provider outage and re-runs the identical path
+      with `--deterministic`, printing a note. A suite that reports "no staging promotion" for an
+      upstream outage sends you debugging the wrong system.
+- [x] **Suite green again after both fixes**, with the LLM provider still down — which is the point:
+      `happy path OK · violation 1 OK · violation 2 OK · ALL CHECKS PASSED`.
 ### Batch 21 — HA's real backend landed; rewired against it, finished GN's plan through Phase 5
 User added HA's files through his own Phase 4 (severity engine, planner, policy_gen, manifest,
 `CONTRACT.md`, a real `evidence/unguarded_trace.jsonl`) and asked to complete Phase 0–4, then
