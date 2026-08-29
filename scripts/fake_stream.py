@@ -10,14 +10,18 @@ live backend is ever unstable at demo time.
 Usage:  python -m scripts.fake_stream --scenario blocked
         python scripts/fake_stream.py --scenario held
 
-Scenarios: clean | blocked | held | approved. `scopebreach` existed here
-until CONTRACT.md §5 — delegation confinement was tested live against the
-real platform and does not hold (a delegate's token carries the parent's
-full authority regardless of subtree headers). GN does not build delegation
-rings; there is nothing to replay.
+Scenarios: clean | blocked | held | approved | scopebreach. CONTRACT.md §5
+struck the *platform's* delegate_subtree() confinement — tested live, does
+not hold, a delegate's token carries the parent's full authority regardless
+of subtree headers. `scopebreach` here is not that: it's agent/crew.py,
+committed after CONTRACT.md and verified live 2026-08-29 against the real
+backend (--guarded --force-violation 3) — confinement enforced by our own
+code, layered on ArmorIQ's real plan-membership check. The frame shapes
+below are copied from that live run's actual stdout, not invented.
 """
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -192,11 +196,54 @@ def scenario_approved():
     emit(end_frame("clean", tool_calls=6, blocked=0, held=0))
 
 
+def scenario_scopebreach():
+    """The plan split at its commit point (step 4, promote_model — the only
+    step writing `promotions`) into evaluator (steps 0-3) and deployer (step
+    4), same as agent/crew.py's split_plan(). Evaluator does its own four
+    steps straight, then reaches for the deployer's step: fully authorized
+    for the crew, not for this delegate."""
+    emit(plan_frame())
+    pause(.5)
+    evaluator_steps, deployer_step = STEPS[:4], STEPS[4]
+    delegation_hash = hashlib.sha256(f"{PLAN_HASH}:evaluator".encode()).hexdigest()
+    emit({"type": "__delegate__", "delegate": "evaluator",
+          "steps": [s["action"] for s in evaluator_steps],
+          "plan_hash": PLAN_HASH, "delegation_hash": delegation_hash})
+    pause(.3)
+    for st in evaluator_steps:
+        emit(verdict(st["i"], st["mcp"], st["action"], st["args"], True, "ALLOW",
+                      {"reversibility": "reversible", "blast_radius": "in-scope", "authority_delta": 0},
+                      [f"in signed plan (step {st['i']}: {st['action']})"]))
+        pause(.3)
+        emit(step_frame(f"c{st['i']}", st["i"], "executed", f"{st['action']} ok"))
+        pause(.15)
+    emit(state_frame())
+    pause(.3)
+    scope = ", ".join(s["action"] for s in evaluator_steps)
+    emit({
+        "type": "__verdict__", "call_id": "c5", "step_index": deployer_step["i"],
+        "mcp": deployer_step["mcp"], "action": deployer_step["action"], "args": deployer_step["args"],
+        "in_plan": True, "verdict": "SCOPEBREACH", "approvable": False,
+        "axes": {"reversibility": None, "blast_radius": None, "authority_delta": 0},
+        "derivation": [
+            f"in the crew's signed plan (step {deployer_step['i'] + 1}: {deployer_step['action']})",
+            f"not in evaluator's sub-plan ({len(evaluator_steps)} steps: {scope})",
+            "the crew's authority is not this delegate's authority",
+            "-> authorized for the crew, not for this delegate",
+        ],
+        "touches_evidence": [], "delegate": "evaluator", "delegation_hash": delegation_hash,
+        "plan_hash": PLAN_HASH, "step_proof": f"proof-{deployer_step['i']}",
+    })
+    pause(.2)
+    emit(end_frame("blocked", tool_calls=4, blocked=1, held=0))
+
+
 SCENARIOS = {
     "clean": scenario_clean,
     "blocked": scenario_blocked,
     "held": scenario_held,
     "approved": scenario_approved,
+    "scopebreach": scenario_scopebreach,
 }
 
 

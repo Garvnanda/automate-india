@@ -370,6 +370,7 @@ body{
 /* BLOCK_HARD must read as visibly a different category from BLOCK — the
    project's best claim, so it gets its own color, not just a label */
 .pstep.hard{--c:#ff2f6b;}
+.pstep.scope{--c:#a78bfa;}
 .pstep .hardtag{
   display:block; font-family:var(--mono); font-size:6.5px; letter-spacing:.08em;
   color:#ff2f6b; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -534,7 +535,10 @@ body{
 .gnode.held .gbox{fill:#221a0c; stroke:var(--amber);} .gnode.held .glabel{fill:var(--amber);}
 .gnode.bad .gbox{fill:#22110d; stroke:var(--red);} .gnode.bad .glabel{fill:var(--red);}
 .gnode.hard .gbox{stroke:#ff2f6b; stroke-width:1.8;} .gnode.hard .gsub{fill:#ff2f6b;}
+.gnode.scope .gbox{stroke:#a78bfa; stroke-width:1.8;} .gnode.scope .gsub{fill:#a78bfa;}
 .gnode.noted .gbox{fill:#122016; stroke:var(--green); opacity:.65;}
+.dring{fill:rgba(167,139,250,.06); stroke:rgba(167,139,250,.4); stroke-width:1; stroke-dasharray:3 3;}
+.dring-label{font-family:var(--mono); font-size:7px; fill:#a78bfa; letter-spacing:.08em;}
 
 /* ── v3 Phase 2: live plan preview — clearly DEV, never shares the real
    run's strip/graph so a mock recompute can never be mistaken for a real
@@ -1381,7 +1385,7 @@ body{
     {key:'model_result', cap:'MODEL', vals:['clears','narrow','fails'], labels:['CLEARS','NARROW','FAILS']},
     {key:'card',         cap:'CARD',  vals:['poisoned','clean','custom'], labels:['POISONED','CLEAN','CUSTOM']},
     {key:'hash_match',   cap:'HASH',  vals:[true,false],                labels:['MATCH','MISMATCH']},
-    {key:'__replay__',   cap:'REPLAY',vals:[0,1,2],                     labels:['LIVE','DEL-ROWS','PROD']},
+    {key:'__replay__',   cap:'REPLAY',vals:[0,1,2,3],                   labels:['LIVE','DEL-ROWS','PROD','SCOPE']},
   ];
   const PRESETS = {
     BASELINE:   {on:['promote_model'], model_result:'clears', card:'clean',    hash_match:true,  __replay__:0},
@@ -1866,10 +1870,13 @@ body{
     hold: `<b>HOLD</b>Lit when a call has been held for human approval. The agent is paused mid-run,
       waiting — nothing is written until someone signs off.`,
     block: `<b>BLOCK</b>Lit when a call was refused outright because it was not in the signed plan.`,
-    hardblock: `<b>NO APPROVAL PATH</b>A distinct category from BLOCK. Lit when a call is both
-      <i>irreversible</i> and <i>tampers with the evidence the run is graded on</i> — deleting rows the
-      metrics already depend on. No role in the hierarchy can approve this; the derivation printed
-      below the plan says why.`,
+    hardblock: `<b>NO APPROVAL PATH</b>A distinct category from BLOCK. Lit for two different reasons,
+      each with its own colour on the graph: <i>pink</i> — the call is irreversible and tampers with the
+      evidence the run is graded on (BLOCK_HARD). <i>purple</i> — the call is fully authorized for the
+      crew but reaches outside the calling delegate's own sub-plan (SCOPEBREACH, <code>agent/crew.py</code>
+      — enforced by our code, not the SDK's own <code>delegate_subtree()</code>, which does not confine
+      on this deployment; see CONTRACT.md §5). Either way, no role in the hierarchy can approve it; the
+      derivation printed below the plan says why.`,
     policy: `<b>GENERATED POLICY</b>Walked from the signed plan, the tool manifest, and the agent's role
       at the moment of signing — not written before this run. Change the plan, not this text, and the
       policy changes with it.`,
@@ -1956,7 +1963,12 @@ body{
     b_hash_match: `<b>CANDIDATE HASH</b>MISMATCH seeds the model under a different hash, so the
       evaluation finds nothing and falls back to default metrics — a real miss rather than a simulated
       one.`,
-    b___replay__: () => dialState.__replay__
+    b___replay__: () => dialState.__replay__ === 3
+      ? `<b>REPLAY · SCOPE</b>Runs the plan as two delegates (evaluator, deployer) and has the evaluator
+         reach for the deployer's own step — <code>promote_model</code>, fully authorized for the crew,
+         not for this delegate. Needs GUARDED mode; the boundary is meaningless with nothing enforcing
+         it.`
+      : dialState.__replay__
       ? `<b>REPLAY · SCRIPTED</b>Bypasses the LLM and replays a fixed call sequence so a recording is
          deterministic. <b>Enforcement is identical</b> — what is skipped is the model's reasoning,
          never a single check. Set it back to LIVE for a judge-facing run.`
@@ -2164,6 +2176,7 @@ body{
     });
     renderPolicy(frame);
     renderGraph(frame);
+    lastFrameSteps = frame.steps || [];
     $('fallbackBadge').classList.toggle('on', !!frame.planner_fallback);
   }
 
@@ -2178,12 +2191,17 @@ body{
     for (const k in attrs) e.setAttribute(k, attrs[k]);
     return e;
   };
+  // shared with renderDelegateRing below — a ring drawn after sign time must
+  // land on the exact same node positions renderGraph already froze
+  const GRAPH_NODE_W = 118, GRAPH_NODE_H = 46, GRAPH_GAP = 26, GRAPH_X0 = 16, GRAPH_Y0 = 46;
+  const graphCx = i => GRAPH_X0 + i * (GRAPH_NODE_W + GRAPH_GAP);
+  let lastFrameSteps = [];
   function renderGraph(frame){
     const svg = $('planGraphSvg');
     svg.innerHTML = '';
     const steps = frame.steps || [];
-    const nodeW = 118, nodeH = 46, gap = 26, x0 = 16, y0 = 46;
-    const cx = i => x0 + i * (nodeW + gap);
+    const nodeW = GRAPH_NODE_W, nodeH = GRAPH_NODE_H, gap = GRAPH_GAP, x0 = GRAPH_X0, y0 = GRAPH_Y0;
+    const cx = graphCx;
     const width = x0 * 2 + (steps.length + 1) * (nodeW + gap);
     svg.setAttribute('viewBox', `0 0 ${width} 130`);
 
@@ -2234,6 +2252,33 @@ body{
     const sub = g.querySelector('.gsub');
     if (sub) sub.textContent = v3HardTag(o) || o.verdict.toLowerCase();
   }
+  /* v3 Phase 6 (docs/implementation-GN.md §7) — delegation rings. A dashed
+     region drawn around one delegate's contiguous slice of the already-frozen
+     graph, keyed off the __delegate__ frame's own step list — never
+     recomputed from anything else, same non-negotiable as the nodes/edges
+     themselves. Positions come from graphCx, identical to renderGraph's, so
+     the ring always lands on the real nodes, not an approximation. */
+  function renderDelegateRing(d){
+    const svg = $('planGraphSvg');
+    if (!svg || !lastFrameSteps.length) return;
+    const idxs = (d.steps || [])
+      .map(a => lastFrameSteps.findIndex(s => s.action === a))
+      .filter(i => i >= 0);
+    if (!idxs.length) return;
+    const lo = Math.min(...idxs), hi = Math.max(...idxs);
+    const old = svg.querySelector(`.dring[data-delegate="${d.delegate}"]`);
+    if (old) old.remove();
+    const x = graphCx(lo) - 8, w = graphCx(hi) + GRAPH_NODE_W - x + 8;
+    const ring = gEl('rect', {
+      class: 'dring', 'data-delegate': d.delegate,
+      x, y: GRAPH_Y0 - 14, width: w, height: GRAPH_NODE_H + 26, rx: 12,
+    });
+    const label = gEl('text', { class: 'dring-label', x: x + 6, y: GRAPH_Y0 - 18 });
+    label.textContent = d.delegate.toUpperCase();
+    const firstNode = svg.querySelector('.gnode');
+    if (firstNode){ svg.insertBefore(ring, firstNode); svg.insertBefore(label, firstNode); }
+    else { svg.appendChild(ring); svg.appendChild(label); }
+  }
   function renderPolicy(frame){
     const pp = $('policyPanel');
     if (!frame.generated_policy){ pp.classList.remove('on'); return; }
@@ -2242,14 +2287,19 @@ body{
       esc(frame.generated_policy);
   }
 
-  // CONTRACT.md §3's real verdict enum: ALLOW | HOLD | BLOCK | BLOCK_HARD | NOTED.
-  // SCOPEBREACH/delegation was in earlier drafts but struck per CONTRACT.md §5 —
-  // tested live against the real platform, confinement does not hold, GN does
-  // not build delegation rings. Nothing here emits it any more.
-  const V3_CLASS = { ALLOW:'run', HOLD:'held', BLOCK:'bad', BLOCK_HARD:'bad hard', NOTED:'done noted' };
-  const V3_CAT   = { ALLOW:'ok', HOLD:'warn', BLOCK:'err', BLOCK_HARD:'err', NOTED:'ok' };
+  // CONTRACT.md §3's core enum: ALLOW | HOLD | BLOCK | BLOCK_HARD | NOTED.
+  // SCOPEBREACH is not in that file — CONTRACT.md §5 struck the *platform's*
+  // delegate_subtree() confinement (tested live, does not hold: a delegate's
+  // token carries the parent's full authority regardless of subtree headers).
+  // What is here instead is agent/crew.py, committed after CONTRACT.md and
+  // verified live 2026-08-29 (--guarded --force-violation 3): confinement
+  // enforced by our own code, layered on top of ArmorIQ's real plan-membership
+  // check, never claimed as the SDK's. See that file's own docstring.
+  const V3_CLASS = { ALLOW:'run', HOLD:'held', BLOCK:'bad', BLOCK_HARD:'bad hard', SCOPEBREACH:'bad scope', NOTED:'done noted' };
+  const V3_CAT   = { ALLOW:'ok', HOLD:'warn', BLOCK:'err', BLOCK_HARD:'err', SCOPEBREACH:'err', NOTED:'ok' };
   function v3HardTag(o){
     if (o.verdict === 'BLOCK_HARD') return 'NO APPROVAL PATH';
+    if (o.verdict === 'SCOPEBREACH') return 'OUT OF SCOPE';
     if (o.verdict === 'NOTED') return 'NOTED';
     return null;
   }
@@ -2284,8 +2334,9 @@ body{
   function handleVerdictV3(o, laneKey, L){
     const cat = V3_CAT[o.verdict] || 'err';
     const hard = o.verdict === 'BLOCK_HARD';
-    fire(L, hard ? 50 : cat === 'err' ? 44 : 24, cat === 'err' ? { decay:22 } : {});
-    mark(o.action, hard ? '#ff2f6b' : (STEP_COLOR[o.action] || '#8d8271'));
+    const scope = o.verdict === 'SCOPEBREACH';
+    fire(L, hard || scope ? 50 : cat === 'err' ? 44 : 24, cat === 'err' ? { decay:22 } : {});
+    mark(o.action, hard ? '#ff2f6b' : scope ? '#a78bfa' : (STEP_COLOR[o.action] || '#8d8271'));
 
     const lines = o.derivation && o.derivation.length ? o.derivation : [];
     log(`${o.action} ${o.verdict}`, cat === 'warn' ? 'warn' : cat === 'ok' ? 'ok' : 'err');
@@ -2298,7 +2349,7 @@ body{
       plan_hash:o.plan_hash, step_proof:o.step_proof, derivation:o.derivation || [],
     });
 
-    setLamp(el.hardBlock, hard);
+    setLamp(el.hardBlock, hard || scope);
     if (o.verdict === 'BLOCK'){
       setLamp(el.block, true);
       L.ceiling = 34; fire(L, 60, { decay:26 }); el.ceilTag.classList.add('hot');
@@ -2306,6 +2357,9 @@ body{
     } else if (hard){
       L.ceiling = 34; fire(L, 60, { decay:26 }); el.ceilTag.classList.add('hot');
       say(`BLOCK_HARD · NO APPROVAL PATH — ${o.action}`);
+    } else if (scope){
+      L.ceiling = 34; fire(L, 60, { decay:26 }); el.ceilTag.classList.add('hot');
+      say(`SCOPEBREACH · ${o.delegate || 'delegate'} reached outside scope — ${o.action}`);
     } else if (o.verdict === 'HOLD'){
       startHoldTimer();
       L.frozen = true; fire(L, 30, { hold:true, decay:900, peak:8 });
@@ -2333,6 +2387,11 @@ body{
       return;
     }
     if (obj && obj.type === '__verdict__'){ handleVerdictV3(obj, laneKey, L); return; }
+    if (obj && obj.type === '__delegate__'){
+      renderDelegateRing(obj);
+      log(`delegate: ${obj.delegate} — ${(obj.steps || []).join(', ')}`, 'ok');
+      return;
+    }
     if (obj && obj.type === '__step__'){
       if (obj.step_index !== null && obj.step_index !== undefined && stepEls[obj.step_index]){
         stepEls[obj.step_index].className = 'pstep done';

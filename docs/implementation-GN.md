@@ -183,16 +183,25 @@ without it rather than faking it** — v1's honesty rule, unchanged.
 
 ---
 
-## 7. Phase 6 — delegation rings (only if HA's Phase 5 lands)
+## 7. Phase 6 — delegation rings — DONE, verified live
 
-Sub-plans render as enclosing regions around their subtrees, keyed off `delegate` on each verdict
-frame. The cross-scope block — evaluator reaching into the deployer's ring — is the payoff.
+The SDK's own `delegate_subtree()` doesn't confine (CONTRACT.md §5, tested live: a delegate's token
+carries the parent's full authority regardless of subtree headers). `agent/crew.py` is the real
+replacement — confinement enforced by our own code, layered on ArmorIQ's real plan-membership
+check, honest about being ours. Built against that, not the SDK path this phase originally assumed.
 
-**Do not start this until HA confirms his Phase 0 verification passed and his Phase 5 gate is
-green.** If he tells you `delegate()` failed verification, this phase never existed.
+Sub-plans render as enclosing regions around their subtrees (`renderDelegateRing`), keyed off
+`delegate`/`__delegate__.steps` — never recomputed from anything else. The cross-scope block —
+evaluator reaching into the deployer's step — renders as a purple-bordered node, `OUT OF SCOPE`,
+sitting outside the ring; `SCOPEBREACH` gets its own class in `V3_CLASS`/`V3_CAT`, distinct purple
+from `BLOCK_HARD`'s pink, same `NO APPROVAL PATH` lamp (both are `approvable:false`).
 
 **Gate:** `fake_stream.py --scenario scopebreach` renders the evaluator's call crossing into the
-deployer's region and being rejected.
+deployer's region and being rejected — verified. **And**, beyond the original gate: verified live
+through the actual browser panel against the real backend (`--guarded --force-violation 3` via
+`GUARDED` + `REPLAY:SCOPE` + `RUN`) — real `__delegate__` frame, real `SCOPEBREACH`, `promotions`
+table confirmed empty in `registry.db` after. See `done.md`'s "GN Phase 6" entry for the full trail,
+including a stale-server-process bug the live test caught and fixed.
 
 ---
 

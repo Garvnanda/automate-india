@@ -304,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
         seed_for(cfg)
 
         args = [PY, "-u", "-m", "agent.main", f"--{mode}", "--config", cfg.to_json()]
-        if violation in ("1", "2"):
+        if violation in ("1", "2", "3"):
             args += ["--force-violation", violation]
         if mode == "guarded" and violation == "2":
             args += ["--hold-timeout", (query.get("holdTimeout") or ["600"])[0]]

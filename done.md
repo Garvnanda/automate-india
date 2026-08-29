@@ -1393,3 +1393,53 @@ gives it a distinct red node, `:2184` renders the `EVALUATOR ONLY` label, and
 - [x] `tests/verify_guarded.py` gained a fourth section asserting the cross-scope block, that
       nothing was promoted, and that the recorded reason is the *boundary* rather than severity or a
       role check. **Suite green: happy path · violation 1 · violation 2 · cross-scope.**
+
+## GN Phase 6 — delegation rings, built and verified live (corrects the note above)
+The "Garv's half was already merged" note above (`:2180`/`:528`/`:2184`, `EVALUATOR ONLY` label,
+red node) does not match the panel as it actually stood when this was picked up — that scaffolding
+had been removed earlier in this same project, in the turn that read CONTRACT.md §5 and (wrongly,
+in hindsight) took the *platform* confinement failure as cancelling the whole phase rather than
+just the SDK-native path `agent/crew.py` went on to replace. Built fresh against the real thing:
+
+- [x] `V3_CLASS`/`V3_CAT`/`v3HardTag` gained `SCOPEBREACH` (`'bad scope'`, tag `OUT OF SCOPE`) —
+      same `.bad`-family treatment as `BLOCK_HARD` (both `approvable:false`, both light the
+      `NO APPROVAL PATH` lamp — true for either reason) but its own **purple**, not pink, on the
+      strip, the graph node and the pulse, so the two "no approval path" categories stay visually
+      distinct on sight, per Phase 1's original non-negotiable.
+- [x] **Delegation rings** (`renderDelegateRing`) — a dashed region drawn around one delegate's
+      contiguous node range on the already-frozen graph, keyed *entirely* off the `__delegate__`
+      frame's own `steps` list (matched back to node index by action name) — never recomputed,
+      same non-negotiable as the nodes/edges themselves. Graph layout constants hoisted to module
+      scope so the ring lands on the exact positions `renderGraph` already froze.
+- [x] `handleEvent` dispatches the real `__delegate__` frame (logs `delegate: evaluator — ...`,
+      draws the ring). `scripts/fake_stream.py` regained a `scopebreach` scenario — every frame
+      shape in it copied verbatim from a real `--guarded --force-violation 3` run's stdout, not
+      invented.
+- [x] REPLAY dial (Bank B) gained a fourth position, `SCOPE`, wired through the exact same
+      `--force-violation` plumbing as `DEL-ROWS`/`PROD`. `panel/server.py`'s violation forwarding
+      only allowed `"1"`/`"2"` — extended to `"3"`.
+- [x] **Caught by testing, not assumed:** after editing `server.py`, the *first* live panel run still
+      executed organically (no `__delegate__`, `promote_model:staging` landed clean) — because
+      `server.py`'s request-handling code loads once at process start, unlike `panel/index.html`
+      which the server re-reads from disk every request. The running server process pre-dated the
+      edit. Fixed by restarting `panel.server` (killed and relaunched on `.venv`'s python — a
+      leftover global-Python copy of the same process was also found and killed); `session_alive()`
+      reused the existing tunnel session rather than re-registering, so no infra churn. Confirmed via
+      raw `curl -N` against `/api/run` before touching the browser again: `__delegate__` →
+      four real `ALLOW`s → real `SCOPEBREACH`, `BLOCKED: promote_model is authorized for the crew,
+      not for the evaluator`.
+- [x] **Verified live, twice over:** (1) `?fake=scopebreach` — ring + purple node + PROOF row +
+      verdict card all correct, zero console errors, `?fake=held` re-run clean as a regression
+      check. (2) The real thing through the actual browser panel — GUARDED armed, REPLAY set to
+      SCOPE, RUN clicked: `EVALUATOR` ring around the first four nodes, `promote_model:staging`
+      purple-bordered `OUT OF SCOPE` sitting outside it, PROOF row 4 reading `SCOPEBREACH`, guarded
+      gauge held at 100. `sqlite3` check on `registry.db` after: `promotions` table empty — the
+      call really never landed, for real, through the real browser.
+- [x] Full suite re-run clean after: `tests/test_mcp_servers.py` (`ALL CHECKS PASSED`),
+      `tests/verify_guarded.py` (`happy path · violation 1 · violation 2 · cross-scope`, all `OK`),
+      plus a direct `violation=0` curl regression confirming the ordinary 5-step guarded path is
+      unaffected — no `__delegate__` frame, staging promotion lands as before.
+- [x] `docs/implementation-GN.md` and `docs/v3.md` are now both fully built, for real, against the
+      real backend: Phases 0–6 done, Phase 6 the delegation-ring surface working against
+      `agent/crew.py`'s agent-side confinement — never claimed as the SDK's own, exactly as
+      `agent/crew.py`'s own docstring insists.
